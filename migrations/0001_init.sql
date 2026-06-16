@@ -1,0 +1,39 @@
+CREATE TABLE IF NOT EXISTS monitors (
+    id TEXT PRIMARY KEY NOT NULL,
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    target TEXT NOT NULL,
+    config_json TEXT NOT NULL,
+    interval_seconds INTEGER NOT NULL,
+    timeout_seconds INTEGER NOT NULL,
+    enabled INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS check_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    monitor_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    latency_ms INTEGER,
+    error TEXT,
+    metadata_json TEXT NOT NULL,
+    checked_at TEXT NOT NULL,
+    FOREIGN KEY (monitor_id) REFERENCES monitors(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_check_results_monitor_checked_at
+    ON check_results(monitor_id, checked_at DESC);
+
+CREATE TABLE IF NOT EXISTS alert_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    monitor_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    message TEXT NOT NULL,
+    delivered INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (monitor_id) REFERENCES monitors(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_alert_events_created_at
+    ON alert_events(created_at DESC);
