@@ -1,11 +1,11 @@
 //! 告警事件 repository。
 
-use chrono::{DateTime, Utc};
 use sqlx::{Row, SqlitePool};
 
 use crate::{
     domain::alert::{AlertEvent, AlertKind},
     error::AppError,
+    storage::time::{from_timestamp_seconds, to_timestamp_seconds},
 };
 
 /// 写入告警事件。
@@ -20,7 +20,7 @@ pub async fn insert(pool: &SqlitePool, event: &AlertEvent) -> Result<(), AppErro
     .bind(event.kind.as_str())
     .bind(&event.message)
     .bind(event.delivered)
-    .bind(event.created_at.to_rfc3339())
+    .bind(to_timestamp_seconds(event.created_at))
     .execute(pool)
     .await?;
 
@@ -64,9 +64,18 @@ pub async fn latest_for_monitor(
     row.map(row_to_alert).transpose()
 }
 
+pub async fn delete_for_monitor(pool: &SqlitePool, monitor_id: &str) -> Result<(), AppError> {
+    sqlx::query("DELETE FROM alert_events WHERE monitor_id = ?")
+        .bind(monitor_id)
+        .execute(pool)
+        .await?;
+
+    Ok(())
+}
+
 fn row_to_alert(row: sqlx::sqlite::SqliteRow) -> Result<AlertEvent, AppError> {
     let kind: String = row.try_get("kind")?;
-    let created_at: String = row.try_get("created_at")?;
+    let created_at: i64 = row.try_get("created_at")?;
 
     Ok(AlertEvent {
         id: row.try_get("id")?,
@@ -74,8 +83,6 @@ fn row_to_alert(row: sqlx::sqlite::SqliteRow) -> Result<AlertEvent, AppError> {
         kind: AlertKind::from(kind.as_str()),
         message: row.try_get("message")?,
         delivered: row.try_get("delivered")?,
-        created_at: DateTime::parse_from_rfc3339(&created_at)
-            .map_err(|err| AppError::BadRequest(err.to_string()))?
-            .with_timezone(&Utc),
+        created_at: from_timestamp_seconds(created_at)?,
     })
 }

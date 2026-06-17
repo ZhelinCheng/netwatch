@@ -6,6 +6,7 @@
 pub mod dns;
 pub mod http;
 pub mod icmp;
+pub mod observation;
 pub mod tcp;
 
 use std::time::Duration;
@@ -28,11 +29,5 @@ pub async fn run(monitor: &Monitor) -> Result<CheckResult, AppError> {
         MonitorKind::Tcp => tcp::probe(monitor, timeout).await,
     };
 
-    Ok(result.unwrap_or_else(|err| {
-        CheckResult::down(
-            monitor.id.clone(),
-            err.to_string(),
-            serde_json::json!({ "target": monitor.target }),
-        )
-    }))
+    Ok(result.unwrap_or_else(|_| CheckResult::failed(monitor.id.clone(), None)))
 }

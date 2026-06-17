@@ -1,11 +1,15 @@
 //! 监控项 repository。
 
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use sqlx::{Row, SqlitePool};
 
 use crate::{
     domain::monitor::{Monitor, MonitorKind, UpdateMonitor, validate_monitor_input},
     error::AppError,
+    storage::{
+        aggregates, alerts, checks,
+        time::{from_timestamp_seconds, to_timestamp_seconds},
+    },
 };
 
 /// 列出所有监控项，按创建时间倒序返回。
@@ -61,8 +65,8 @@ pub async fn insert(pool: &SqlitePool, monitor: &Monitor) -> Result<(), AppError
     .bind(monitor.interval_seconds as i64)
     .bind(monitor.timeout_seconds as i64)
     .bind(monitor.enabled)
-    .bind(monitor.created_at.to_rfc3339())
-    .bind(monitor.updated_at.to_rfc3339())
+    .bind(to_timestamp_seconds(monitor.created_at))
+    .bind(to_timestamp_seconds(monitor.updated_at))
     .execute(pool)
     .await?;
 
@@ -76,6 +80,7 @@ pub async fn update(
 ) -> Result<Monitor, AppError> {
     // 先加载旧值再局部覆盖，确保 PATCH 语义简单且字段默认值不被误改。
     let mut monitor = get(pool, id).await?;
+    let old_interval_seconds = monitor.interval_seconds;
 
     if let Some(name) = input.name {
         monitor.name = name;
@@ -104,6 +109,12 @@ pub async fn update(
     )?;
     monitor.updated_at = Utc::now();
 
+    if old_interval_seconds != monitor.interval_seconds {
+        checks::delete_for_monitor(pool, id).await?;
+        aggregates::delete_for_monitor(pool, id).await?;
+        alerts::delete_for_monitor(pool, id).await?;
+    }
+
     sqlx::query(
         r#"
         UPDATE monitors
@@ -118,7 +129,7 @@ pub async fn update(
     .bind(monitor.interval_seconds as i64)
     .bind(monitor.timeout_seconds as i64)
     .bind(monitor.enabled)
-    .bind(monitor.updated_at.to_rfc3339())
+    .bind(to_timestamp_seconds(monitor.updated_at))
     .bind(id)
     .execute(pool)
     .await?;
@@ -160,8 +171,8 @@ pub async fn set_enabled(pool: &SqlitePool, id: &str, enabled: bool) -> Result<M
 fn row_to_monitor(row: sqlx::sqlite::SqliteRow) -> Result<Monitor, AppError> {
     let kind: String = row.try_get("kind")?;
     let config_json: String = row.try_get("config_json")?;
-    let created_at: String = row.try_get("created_at")?;
-    let updated_at: String = row.try_get("updated_at")?;
+    let created_at: i64 = row.try_get("created_at")?;
+    let updated_at: i64 = row.try_get("updated_at")?;
 
     Ok(Monitor {
         id: row.try_get("id")?,
@@ -172,11 +183,7 @@ fn row_to_monitor(row: sqlx::sqlite::SqliteRow) -> Result<Monitor, AppError> {
         interval_seconds: row.try_get::<i64, _>("interval_seconds")? as u64,
         timeout_seconds: row.try_get::<i64, _>("timeout_seconds")? as u64,
         enabled: row.try_get("enabled")?,
-        created_at: DateTime::parse_from_rfc3339(&created_at)
-            .map_err(|err| AppError::BadRequest(err.to_string()))?
-            .with_timezone(&Utc),
-        updated_at: DateTime::parse_from_rfc3339(&updated_at)
-            .map_err(|err| AppError::BadRequest(err.to_string()))?
-            .with_timezone(&Utc),
+        created_at: from_timestamp_seconds(created_at)?,
+        updated_at: from_timestamp_seconds(updated_at)?,
     })
 }

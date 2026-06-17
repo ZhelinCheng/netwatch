@@ -3,11 +3,11 @@
 use std::time::{Duration, Instant};
 
 use reqwest::Client;
-use serde_json::json;
 
 use crate::{
     domain::{check::CheckResult, monitor::Monitor},
     error::AppError,
+    probes::observation::{ProbeObservation, is_success},
 };
 
 /// 检查目标 URL 的状态码，并可选检查响应体关键字。
@@ -24,39 +24,38 @@ pub async fn probe(monitor: &Monitor, timeout: Duration) -> Result<CheckResult, 
         .map_err(anyhow::Error::from)?;
 
     let status = response.status().as_u16();
-    let expected = monitor.config.expected_status.unwrap_or(200);
-    // 只有配置了关键字时才读取响应体，避免普通状态码检查产生额外开销。
-    let body = if monitor.config.keyword.is_some() {
+    let headers = response
+        .headers()
+        .iter()
+        .filter_map(|(key, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|value| (key.as_str().to_ascii_lowercase(), value.to_string()))
+        })
+        .collect();
+    let should_read_body = monitor.config.keyword.is_some()
+        || monitor
+            .config
+            .success_rules
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .any(|rule| matches!(rule, crate::domain::monitor::SuccessRule::HttpBody { .. }));
+    let body = if should_read_body {
         Some(response.text().await.map_err(anyhow::Error::from)?)
     } else {
         None
     };
-    let latency_ms = started.elapsed().as_millis() as u64;
+    let latency_us = started.elapsed().as_micros() as u64;
+    let mut observation = ProbeObservation::new(latency_us);
+    observation.http_status = Some(status);
+    observation.http_headers = headers;
+    observation.http_body = body;
 
-    let metadata = json!({
-        "target": monitor.target,
-        "status": status,
-        "expected_status": expected
-    });
-
-    if status != expected {
-        return Ok(CheckResult::down(
-            monitor.id.clone(),
-            format!("expected status {expected}, got {status}"),
-            metadata,
-        ));
+    if is_success(monitor, &observation) {
+        Ok(CheckResult::success(monitor.id.clone(), latency_us))
+    } else {
+        Ok(CheckResult::failed(monitor.id.clone(), Some(latency_us)))
     }
-
-    if let Some(keyword) = &monitor.config.keyword {
-        let body = body.unwrap_or_default();
-        if !body.contains(keyword) {
-            return Ok(CheckResult::down(
-                monitor.id.clone(),
-                format!("keyword not found: {keyword}"),
-                metadata,
-            ));
-        }
-    }
-
-    Ok(CheckResult::up(monitor.id.clone(), latency_ms, metadata))
 }

@@ -2,7 +2,6 @@
 
 use std::time::Instant;
 
-use serde_json::json;
 use tokio::{
     net::{TcpStream, lookup_host},
     time,
@@ -33,10 +32,9 @@ pub async fn probe(
         .map_err(|_| AppError::BadRequest("tcp connection timed out".to_string()))?
         .map_err(anyhow::Error::from)?;
 
-    Ok(CheckResult::up(
+    Ok(CheckResult::success(
         monitor.id.clone(),
-        started.elapsed().as_millis() as u64,
-        json!({ "target": monitor.target, "address": socket.to_string() }),
+        started.elapsed().as_micros() as u64,
     ))
 }
 

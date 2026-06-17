@@ -25,8 +25,9 @@ pub struct Dashboard {
     /// 最近告警事件。
     alerts: Vec<crate::domain::alert::AlertEvent>,
     total: usize,
-    up: usize,
-    down: usize,
+    success: usize,
+    failed: usize,
+    unknown: usize,
 }
 
 pub fn router() -> Router<AppState> {
@@ -42,26 +43,43 @@ async fn dashboard(State(state): State<AppState>) -> Result<Json<Dashboard>, App
         .into_iter()
         .map(|result| (result.monitor_id.clone(), result))
         .collect();
+    let buffered_latest = state.check_buffer().latest_by_monitor().await;
+    let latest = merge_latest(latest, buffered_latest);
     let alerts = alerts::list(state.pool(), 10).await?;
     let total = monitors.len();
     // Dashboard 的当前状态只看最新一次探测结果；没有结果的监控项不计入 up/down。
-    let down = latest
+    let failed = latest
         .values()
-        .filter(|result| result.status == CheckStatus::Down)
+        .filter(|result| result.status == CheckStatus::Failed)
         .count();
-    let up = latest
+    let success = latest
         .values()
-        .filter(|result| result.status == CheckStatus::Up)
+        .filter(|result| result.status == CheckStatus::Success)
         .count();
+    let unknown = total.saturating_sub(success + failed);
 
     Ok(Json(Dashboard {
         monitors,
         latest,
         alerts,
         total,
-        up,
-        down,
+        success,
+        failed,
+        unknown,
     }))
+}
+
+fn merge_latest(
+    mut latest: HashMap<String, crate::domain::check::CheckResult>,
+    buffered_latest: HashMap<String, crate::domain::check::CheckResult>,
+) -> HashMap<String, crate::domain::check::CheckResult> {
+    for (monitor_id, result) in buffered_latest {
+        let entry = latest.entry(monitor_id).or_insert_with(|| result.clone());
+        if result.checked_at > entry.checked_at {
+            *entry = result;
+        }
+    }
+    latest
 }
 
 async fn status_page(

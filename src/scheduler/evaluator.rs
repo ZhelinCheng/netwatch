@@ -1,6 +1,6 @@
 //! 告警评估。
 //!
-//! 第一版规则很克制：连续失败达到阈值触发 down，down 后首次成功触发 recovered。
+//! 第一版规则很克制：连续 failed 达到阈值触发 down，down 后首次 success 触发 recovered。
 
 use chrono::Utc;
 
@@ -29,9 +29,9 @@ pub async fn evaluate(
     .await?;
     let latest_alert = alerts::latest_for_monitor(state.pool(), &monitor.id).await?;
 
-    let event = if result.status == CheckStatus::Down
+    let event = if result.status == CheckStatus::Failed
         && recent.len() == state.config().failure_threshold as usize
-        && recent.iter().all(|item| item.status == CheckStatus::Down)
+        && recent.iter().all(|item| item.status == CheckStatus::Failed)
         && !matches!(
             latest_alert.as_ref().map(|event| &event.kind),
             Some(AlertKind::Triggered)
@@ -40,18 +40,11 @@ pub async fn evaluate(
             id: None,
             monitor_id: monitor.id.clone(),
             kind: AlertKind::Triggered,
-            message: format!(
-                "{} is down: {}",
-                monitor.name,
-                result
-                    .error
-                    .clone()
-                    .unwrap_or_else(|| "unknown error".to_string())
-            ),
+            message: format!("{} is failing", monitor.name),
             delivered: false,
             created_at: Utc::now(),
         })
-    } else if result.status == CheckStatus::Up
+    } else if result.status == CheckStatus::Success
         && matches!(
             latest_alert.as_ref().map(|event| &event.kind),
             Some(AlertKind::Triggered)

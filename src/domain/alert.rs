@@ -41,5 +41,6 @@ pub struct AlertEvent {
     pub kind: AlertKind,
     pub message: String,
     pub delivered: bool,
+    #[serde(with = "chrono::serde::ts_seconds")]
     pub created_at: DateTime<Utc>,
 }

@@ -33,6 +33,7 @@ http://127.0.0.1:4311
 - `NETWATCH_DATABASE_URL`：SQLite 地址，默认 `sqlite://netwatch.db`
 - `NETWATCH_SCHEDULER_TICK_SECONDS`：调度扫描间隔，默认 `5`
 - `NETWATCH_FAILURE_THRESHOLD`：连续失败多少次触发告警，默认 `3`
+- `NETWATCH_AGGREGATION_TIMEZONE`：聚合日历时区，未设置时使用电脑当前时区
 - `NETWATCH_WEBHOOK_URL`：Webhook 通知地址，可选
 
 ## API

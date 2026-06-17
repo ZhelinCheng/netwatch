@@ -7,18 +7,18 @@ CREATE TABLE IF NOT EXISTS monitors (
     interval_seconds INTEGER NOT NULL,
     timeout_seconds INTEGER NOT NULL,
     enabled INTEGER NOT NULL,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS check_results (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     monitor_id TEXT NOT NULL,
     status TEXT NOT NULL,
-    latency_ms INTEGER,
+    latency_us INTEGER,
     error TEXT,
     metadata_json TEXT NOT NULL,
-    checked_at TEXT NOT NULL,
+    checked_at INTEGER NOT NULL,
     FOREIGN KEY (monitor_id) REFERENCES monitors(id) ON DELETE CASCADE
 );
 
@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS alert_events (
     kind TEXT NOT NULL,
     message TEXT NOT NULL,
     delivered INTEGER NOT NULL,
-    created_at TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
     FOREIGN KEY (monitor_id) REFERENCES monitors(id) ON DELETE CASCADE
 );
 

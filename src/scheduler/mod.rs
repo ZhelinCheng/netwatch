@@ -2,7 +2,9 @@
 //!
 //! 调度器按固定 tick 扫描启用的监控项，具体是否到达探测间隔由 worker 判断。
 
+pub mod compact;
 pub mod evaluator;
+pub mod flush;
 pub mod worker;
 
 use tokio::time;
@@ -14,12 +16,35 @@ pub struct Scheduler;
 impl Scheduler {
     /// 启动一个后台任务，随 Web 服务进程生命周期运行。
     pub fn start(state: AppState) {
+        let monitor_state = state.clone();
         tokio::spawn(async move {
-            let mut ticker = time::interval(state.config().scheduler_tick);
+            let mut ticker = time::interval(monitor_state.config().scheduler_tick);
             loop {
                 ticker.tick().await;
-                if let Err(error) = tick(state.clone()).await {
+                if let Err(error) = tick(monitor_state.clone()).await {
                     tracing::warn!(?error, "scheduler tick failed");
+                }
+            }
+        });
+
+        let compact_state = state.clone();
+        tokio::spawn(async move {
+            let mut ticker = time::interval(compact_state.config().compact_interval);
+            loop {
+                ticker.tick().await;
+                if let Err(error) = compact::run(compact_state.clone()).await {
+                    tracing::warn!(?error, "compact tick failed");
+                }
+            }
+        });
+
+        let flush_state = state.clone();
+        tokio::spawn(async move {
+            let mut ticker = time::interval(flush_state.config().check_flush_interval);
+            loop {
+                ticker.tick().await;
+                if let Err(error) = flush::run(flush_state.clone()).await {
+                    tracing::warn!(?error, "check result flush failed");
                 }
             }
         });

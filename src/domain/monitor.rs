@@ -52,6 +52,12 @@ pub struct MonitorConfig {
     /// HTTP 探测期望状态码，默认 200。
     #[serde(default)]
     pub expected_status: Option<u16>,
+    /// HTTP 默认状态码下界；未设置自定义规则时默认使用 200。
+    #[serde(default)]
+    pub expected_status_min: Option<u16>,
+    /// HTTP 默认状态码上界；未设置自定义规则时默认使用 400（不含）。
+    #[serde(default)]
+    pub expected_status_max: Option<u16>,
     /// HTTP 探测可选关键字；设置后响应体必须包含该字符串。
     #[serde(default)]
     pub keyword: Option<String>,
@@ -61,16 +67,122 @@ pub struct MonitorConfig {
     /// DNS 期望解析结果；设置后至少一个解析值需要精确匹配。
     #[serde(default)]
     pub expected_value: Option<String>,
+    /// 用户自定义成功判断规则；为空时使用协议默认判断。
+    #[serde(default)]
+    pub success_rules: Option<Vec<SuccessRule>>,
 }
 
 impl Default for MonitorConfig {
     fn default() -> Self {
         Self {
-            expected_status: Some(200),
+            expected_status: None,
+            expected_status_min: None,
+            expected_status_max: None,
             keyword: None,
             dns_record: Some("A".to_string()),
             expected_value: None,
+            success_rules: None,
         }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CompareOp {
+    /// 等于。
+    Eq,
+    /// 不等于。
+    Ne,
+    /// 大于。
+    Gt,
+    /// 大于等于。
+    Gte,
+    /// 小于。
+    Lt,
+    /// 小于等于。
+    Lte,
+}
+
+impl CompareOp {
+    /// 对数值型观测值执行比较。
+    pub fn matches_u64(&self, left: u64, right: u64) -> bool {
+        match self {
+            Self::Eq => left == right,
+            Self::Ne => left != right,
+            Self::Gt => left > right,
+            Self::Gte => left >= right,
+            Self::Lt => left < right,
+            Self::Lte => left <= right,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TextOp {
+    /// 包含目标文本。
+    Contains,
+    /// 与目标文本完全一致。
+    Equals,
+    /// 不包含目标文本。
+    NotContains,
+    /// 与目标文本不一致。
+    NotEquals,
+}
+
+impl TextOp {
+    /// 对单个文本值执行匹配。
+    pub fn matches(&self, left: &str, right: &str) -> bool {
+        match self {
+            Self::Contains => left.contains(right),
+            Self::Equals => left == right,
+            Self::NotContains => !left.contains(right),
+            Self::NotEquals => left != right,
+        }
+    }
+
+    /// 对一组候选文本执行匹配；否定操作要求所有候选都不命中。
+    pub fn matches_any<'a>(
+        &self,
+        values: impl IntoIterator<Item = &'a str>,
+        expected: &str,
+    ) -> bool {
+        match self {
+            Self::NotContains | Self::NotEquals => values
+                .into_iter()
+                .all(|value| self.matches(value, expected)),
+            Self::Contains | Self::Equals => values
+                .into_iter()
+                .any(|value| self.matches(value, expected)),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SuccessRule {
+    /// HTTP 状态码规则。
+    HttpStatus { op: CompareOp, value: u16 },
+    /// HTTP 响应体文本规则。
+    HttpBody { op: TextOp, value: String },
+    /// HTTP 响应头规则，key 会按小写匹配。
+    HttpHeader {
+        key: String,
+        op: TextOp,
+        value: String,
+    },
+    /// DNS 解析结果规则。
+    DnsAnswer { op: TextOp, value: String },
+    /// 通用延迟规则，可叠加在任意协议上。
+    Latency { op: CompareOp, value_us: u64 },
+}
+
+impl MonitorConfig {
+    /// 是否启用了用户自定义成功规则。
+    pub fn has_success_rules(&self) -> bool {
+        self.success_rules
+            .as_ref()
+            .is_some_and(|rules| !rules.is_empty())
     }
 }
 
@@ -90,7 +202,9 @@ pub struct Monitor {
     pub timeout_seconds: u64,
     /// 关闭后调度器会跳过该监控项。
     pub enabled: bool,
+    #[serde(with = "chrono::serde::ts_seconds")]
     pub created_at: DateTime<Utc>,
+    #[serde(with = "chrono::serde::ts_seconds")]
     pub updated_at: DateTime<Utc>,
 }
 

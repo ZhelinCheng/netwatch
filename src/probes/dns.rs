@@ -5,12 +5,12 @@
 
 use std::time::{Duration, Instant};
 
-use serde_json::json;
 use tokio::{net::lookup_host, time};
 
 use crate::{
     domain::{check::CheckResult, monitor::Monitor},
     error::AppError,
+    probes::observation::{ProbeObservation, is_success},
 };
 
 /// 解析目标域名并记录耗时，可选校验期望 IP/值。
@@ -27,31 +27,13 @@ pub async fn probe(monitor: &Monitor, timeout: Duration) -> Result<CheckResult, 
         .map_err(|_| AppError::BadRequest("dns lookup timed out".to_string()))?
         .map_err(anyhow::Error::from)?;
     let values: Vec<String> = addrs.map(|addr| addr.ip().to_string()).collect();
-    let latency_ms = started.elapsed().as_millis() as u64;
+    let latency_us = started.elapsed().as_micros() as u64;
+    let mut observation = ProbeObservation::new(latency_us);
+    observation.dns_answers = values;
 
-    let metadata = json!({
-        "target": monitor.target,
-        "record": monitor.config.dns_record.as_deref().unwrap_or("A"),
-        "values": values
-    });
-
-    if let Some(expected) = &monitor.config.expected_value {
-        if !values.iter().any(|value| value == expected) {
-            return Ok(CheckResult::down(
-                monitor.id.clone(),
-                format!("expected DNS value not found: {expected}"),
-                metadata,
-            ));
-        }
+    if is_success(monitor, &observation) {
+        Ok(CheckResult::success(monitor.id.clone(), latency_us))
+    } else {
+        Ok(CheckResult::failed(monitor.id.clone(), Some(latency_us)))
     }
-
-    if values.is_empty() {
-        return Ok(CheckResult::down(
-            monitor.id.clone(),
-            "dns lookup returned no records",
-            metadata,
-        ));
-    }
-
-    Ok(CheckResult::up(monitor.id.clone(), latency_ms, metadata))
 }

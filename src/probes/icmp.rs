@@ -4,7 +4,6 @@
 
 use std::{process::Stdio, time::Instant};
 
-use serde_json::json;
 use tokio::{process::Command, time};
 
 use crate::{
@@ -31,21 +30,11 @@ pub async fn probe(
     .map_err(|_| AppError::BadRequest("ping timed out".to_string()))?
     .map_err(anyhow::Error::from)?;
 
-    let latency_ms = started.elapsed().as_millis() as u64;
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let metadata = json!({
-        "target": monitor.target,
-        "stdout": stdout.lines().take(4).collect::<Vec<_>>(),
-    });
+    let latency_us = started.elapsed().as_micros() as u64;
 
     if output.status.success() {
-        Ok(CheckResult::up(monitor.id.clone(), latency_ms, metadata))
+        Ok(CheckResult::success(monitor.id.clone(), latency_us))
     } else {
-        Ok(CheckResult::down(
-            monitor.id.clone(),
-            stderr.trim().to_string(),
-            metadata,
-        ))
+        Ok(CheckResult::failed(monitor.id.clone(), Some(latency_us)))
     }
 }

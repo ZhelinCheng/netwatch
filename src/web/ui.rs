@@ -49,8 +49,8 @@ const INDEX_HTML: &str = r#"<!doctype html>
     th, td { padding: 10px 8px; border-bottom: 1px solid #edf0f3; text-align: left; vertical-align: top; }
     th { color: #687385; font-weight: 600; font-size: 12px; text-transform: uppercase; }
     .status { display: inline-flex; align-items: center; min-width: 58px; justify-content: center; height: 24px; border-radius: 999px; font-size: 12px; font-weight: 700; }
-    .up { background: #d9f7e7; color: #17663a; }
-    .down { background: #ffe0df; color: #9b1c17; }
+    .success { background: #d9f7e7; color: #17663a; }
+    .failed { background: #ffe0df; color: #9b1c17; }
     .unknown { background: #eceff3; color: #586172; }
     @media (max-width: 860px) { .summary, .layout { grid-template-columns: 1fr; } header, main { padding-left: 16px; padding-right: 16px; } }
   </style>
@@ -63,8 +63,8 @@ const INDEX_HTML: &str = r#"<!doctype html>
   <main>
     <section class="grid summary">
       <div class="panel"><div class="muted">监控项</div><div class="metric" id="total">0</div></div>
-      <div class="panel"><div class="muted">在线</div><div class="metric" id="up">0</div></div>
-      <div class="panel"><div class="muted">异常</div><div class="metric" id="down">0</div></div>
+      <div class="panel"><div class="muted">成功</div><div class="metric" id="success">0</div></div>
+      <div class="panel"><div class="muted">失败</div><div class="metric" id="failed">0</div></div>
       <div class="panel"><div class="muted">最近告警</div><div class="metric" id="alerts">0</div></div>
     </section>
     <section class="layout">
@@ -101,18 +101,23 @@ const INDEX_HTML: &str = r#"<!doctype html>
     }
     function statusClass(result) {
       if (!result) return "unknown";
-      return result.status === "up" ? "up" : "down";
+      return result.status;
+    }
+    function formatLatency(latencyUs) {
+      if (latencyUs === null || latencyUs === undefined) return "-";
+      if (latencyUs < 1000) return `${latencyUs} us`;
+      return `${(latencyUs / 1000).toFixed(2)} ms`;
     }
     async function load() {
       const data = await api("/api/dashboard");
       document.getElementById("total").textContent = data.total;
-      document.getElementById("up").textContent = data.up;
-      document.getElementById("down").textContent = data.down;
+      document.getElementById("success").textContent = data.success;
+      document.getElementById("failed").textContent = data.failed;
       document.getElementById("alerts").textContent = data.alerts.length;
       document.getElementById("monitors").innerHTML = data.monitors.map(monitor => {
         const latest = data.latest[monitor.id];
         const status = latest ? latest.status : "unknown";
-        const latency = latest && latest.latency_ms !== null ? `${latest.latency_ms} ms` : "-";
+        const latency = latest ? formatLatency(latest.latency_us) : "-";
         return `<tr>
           <td><span class="status ${statusClass(latest)}">${status}</span></td>
           <td>${monitor.name}</td>
