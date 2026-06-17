@@ -239,6 +239,7 @@ impl From<CheckAggregate> for AggregatePoint {
     }
 }
 
+#[cfg(test)]
 impl LatencyMetrics {
     /// 基于最近一批探测结果计算可用率和延迟指标。
     pub fn from_results(results: &[CheckResult]) -> Self {
@@ -288,6 +289,7 @@ impl LatencyMetrics {
     }
 }
 
+#[cfg(test)]
 fn percentile(values: &[u64], quantile: f64) -> Option<u64> {
     if values.is_empty() {
         return None;

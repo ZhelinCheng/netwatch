@@ -41,6 +41,27 @@ struct ChecksResponse {
     results: Vec<CheckSeriesPoint>,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct TimeRange {
+    from: DateTime<Utc>,
+    to: DateTime<Utc>,
+}
+
+impl TimeRange {
+    /// 计算两个时间范围的交集，空区间直接跳过。
+    fn overlap(self, other: Self) -> Option<Self> {
+        let from = self.from.max(other.from);
+        let to = self.to.min(other.to);
+        (from < to).then_some(Self { from, to })
+    }
+}
+
+#[derive(Default)]
+struct SeriesOutput {
+    series: Vec<CheckSeriesPoint>,
+    resolutions: Vec<&'static str>,
+}
+
 pub fn router() -> Router<AppState> {
     Router::new().route("/api/monitors/:id/checks", get(list))
 }
@@ -69,60 +90,58 @@ async fn list(
         let today_start = local_day_start_utc(Utc::now(), timezone);
         let minute_cutoff = today_start - Duration::days(7);
         let hour_cutoff = today_start - Duration::days(30);
-        let mut series = Vec::new();
-        let mut resolutions = Vec::new();
+        let query_range = TimeRange { from, to };
+        let mut output = SeriesOutput::default();
 
         // 按保留策略分段查询：越旧的数据粒度越粗，最近一天返回原始点。
         append_aggregate_segment(
             state.pool(),
             &monitor.id,
-            from,
-            to,
-            from,
-            hour_cutoff,
+            query_range,
+            TimeRange {
+                from,
+                to: hour_cutoff,
+            },
             AggregateBucketSize::Day,
-            &mut series,
-            &mut resolutions,
+            &mut output,
         )
         .await?;
         append_aggregate_segment(
             state.pool(),
             &monitor.id,
-            from,
-            to,
-            hour_cutoff,
-            minute_cutoff,
+            query_range,
+            TimeRange {
+                from: hour_cutoff,
+                to: minute_cutoff,
+            },
             AggregateBucketSize::Hour,
-            &mut series,
-            &mut resolutions,
+            &mut output,
         )
         .await?;
         append_aggregate_segment(
             state.pool(),
             &monitor.id,
-            from,
-            to,
-            minute_cutoff,
-            today_start,
+            query_range,
+            TimeRange {
+                from: minute_cutoff,
+                to: today_start,
+            },
             AggregateBucketSize::Minute,
-            &mut series,
-            &mut resolutions,
+            &mut output,
         )
         .await?;
         append_raw_segment(
             &state,
             &monitor.id,
             monitor.interval_seconds,
-            from,
-            to,
+            query_range,
             today_start,
-            &mut series,
-            &mut resolutions,
+            &mut output,
         )
         .await?;
 
-        series.sort_by_key(series_time);
-        (resolution_label(&resolutions), series)
+        output.series.sort_by_key(series_time);
+        (resolution_label(&output.resolutions), output.series)
     } else {
         // 列表模式服务于详情页“最近结果”，只返回原始数据。
         let limit = query.limit.unwrap_or(100).clamp(1, 1000);
@@ -146,26 +165,22 @@ async fn list(
 async fn append_aggregate_segment(
     pool: &sqlx::SqlitePool,
     monitor_id: &str,
-    query_from: DateTime<Utc>,
-    query_to: DateTime<Utc>,
-    segment_from: DateTime<Utc>,
-    segment_to: DateTime<Utc>,
+    query_range: TimeRange,
+    segment_range: TimeRange,
     bucket_size: AggregateBucketSize,
-    series: &mut Vec<CheckSeriesPoint>,
-    resolutions: &mut Vec<&'static str>,
+    output: &mut SeriesOutput,
 ) -> Result<(), AppError> {
-    let from = query_from.max(segment_from);
-    let to = query_to.min(segment_to);
-    if from >= to {
+    let Some(range) = query_range.overlap(segment_range) else {
         return Ok(());
-    }
+    };
 
     let aggregates =
-        aggregates::list_for_monitor_between(pool, monitor_id, bucket_size, from, to).await?;
+        aggregates::list_for_monitor_between(pool, monitor_id, bucket_size, range.from, range.to)
+            .await?;
     if !aggregates.is_empty() {
-        resolutions.push(bucket_size.as_str());
+        output.resolutions.push(bucket_size.as_str());
     }
-    series.extend(
+    output.series.extend(
         aggregates
             .into_iter()
             .map(AggregatePoint::from)
@@ -180,14 +195,12 @@ async fn append_raw_segment(
     state: &AppState,
     monitor_id: &str,
     interval_seconds: u64,
-    query_from: DateTime<Utc>,
-    query_to: DateTime<Utc>,
+    query_range: TimeRange,
     today_start: DateTime<Utc>,
-    series: &mut Vec<CheckSeriesPoint>,
-    resolutions: &mut Vec<&'static str>,
+    output: &mut SeriesOutput,
 ) -> Result<(), AppError> {
-    let from = query_from.max(today_start);
-    let to = query_to;
+    let from = query_range.from.max(today_start);
+    let to = query_range.to;
     if from > to {
         return Ok(());
     }
@@ -203,9 +216,11 @@ async fn append_raw_segment(
     real_results.sort_by_key(|result| result.checked_at);
     let results = fill_unknown_points(monitor_id, interval_seconds, from, to, real_results)?;
     if !results.is_empty() {
-        resolutions.push("raw");
+        output.resolutions.push("raw");
     }
-    series.extend(results.into_iter().map(CheckSeriesPoint::Raw));
+    output
+        .series
+        .extend(results.into_iter().map(CheckSeriesPoint::Raw));
 
     Ok(())
 }
