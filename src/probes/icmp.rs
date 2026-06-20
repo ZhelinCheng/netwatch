@@ -16,6 +16,12 @@ pub async fn probe(
     timeout: std::time::Duration,
 ) -> Result<CheckResult, AppError> {
     let started = Instant::now();
+    tracing::debug!(
+        monitor_id = monitor.id,
+        target = %monitor.target,
+        timeout_ms = timeout.as_millis(),
+        "starting ping probe"
+    );
     let output = time::timeout(
         timeout,
         Command::new("ping")
@@ -33,8 +39,19 @@ pub async fn probe(
     let latency_us = started.elapsed().as_micros() as u64;
 
     if output.status.success() {
-        Ok(CheckResult::success(monitor.id.clone(), latency_us))
+        tracing::debug!(
+            monitor_id = monitor.id,
+            latency_us = latency_us,
+            "ping probe succeeded"
+        );
+        Ok(CheckResult::success(monitor.id, latency_us))
     } else {
-        Ok(CheckResult::failed(monitor.id.clone(), Some(latency_us)))
+        tracing::debug!(
+            monitor_id = monitor.id,
+            latency_us = latency_us,
+            status = ?output.status.code(),
+            "ping probe failed"
+        );
+        Ok(CheckResult::failed(monitor.id, Some(latency_us)))
     }
 }

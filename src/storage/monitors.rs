@@ -1,7 +1,7 @@
 //! 监控项 repository。
 
 use chrono::Utc;
-use sqlx::{Row, SqlitePool};
+use sqlx::{Row, Sqlite, SqlitePool, Transaction};
 
 use crate::{
     domain::monitor::{Monitor, MonitorKind, UpdateMonitor, validate_monitor_input},
@@ -29,7 +29,7 @@ pub async fn list(pool: &SqlitePool) -> Result<Vec<Monitor>, AppError> {
 }
 
 /// 获取单个监控项。
-pub async fn get(pool: &SqlitePool, id: &str) -> Result<Monitor, AppError> {
+pub async fn get(pool: &SqlitePool, id: i64) -> Result<Monitor, AppError> {
     let row = sqlx::query(
         r#"
         SELECT id, name, kind, target, config_json, interval_seconds, timeout_seconds,
@@ -46,18 +46,34 @@ pub async fn get(pool: &SqlitePool, id: &str) -> Result<Monitor, AppError> {
     row_to_monitor(row)
 }
 
-/// 插入新的监控项。
-pub async fn insert(pool: &SqlitePool, monitor: &Monitor) -> Result<(), AppError> {
-    sqlx::query(
+/// 在事务内获取单个监控项。
+pub async fn get_tx(tx: &mut Transaction<'_, Sqlite>, id: i64) -> Result<Monitor, AppError> {
+    let row = sqlx::query(
         r#"
-        INSERT INTO monitors (
-            id, name, kind, target, config_json, interval_seconds, timeout_seconds,
-            enabled, created_at, updated_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        SELECT id, name, kind, target, config_json, interval_seconds, timeout_seconds,
+               enabled, created_at, updated_at
+        FROM monitors
+        WHERE id = ?
         "#,
     )
-    .bind(&monitor.id)
+    .bind(id)
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or(AppError::NotFound)?;
+
+    row_to_monitor(row)
+}
+
+/// 插入新的监控项。
+pub async fn insert(pool: &SqlitePool, monitor: &Monitor) -> Result<Monitor, AppError> {
+    let result = sqlx::query(
+        r#"
+        INSERT INTO monitors (
+            name, kind, target, config_json, interval_seconds, timeout_seconds,
+            enabled, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "#,
+    )
     .bind(&monitor.name)
     .bind(monitor.kind.as_str())
     .bind(&monitor.target)
@@ -70,14 +86,12 @@ pub async fn insert(pool: &SqlitePool, monitor: &Monitor) -> Result<(), AppError
     .execute(pool)
     .await?;
 
-    Ok(())
+    let mut monitor = monitor.clone();
+    monitor.id = result.last_insert_rowid();
+    Ok(monitor)
 }
 
-pub async fn update(
-    pool: &SqlitePool,
-    id: &str,
-    input: UpdateMonitor,
-) -> Result<Monitor, AppError> {
+pub async fn update(pool: &SqlitePool, id: i64, input: UpdateMonitor) -> Result<Monitor, AppError> {
     // 先加载旧值再局部覆盖，确保 PATCH 语义简单且字段默认值不被误改。
     let mut monitor = get(pool, id).await?;
     let old_interval_seconds = monitor.interval_seconds;
@@ -138,7 +152,7 @@ pub async fn update(
 }
 
 /// 删除监控项；关联的探测结果和告警由外键级联删除。
-pub async fn delete(pool: &SqlitePool, id: &str) -> Result<(), AppError> {
+pub async fn delete(pool: &SqlitePool, id: i64) -> Result<(), AppError> {
     let result = sqlx::query("DELETE FROM monitors WHERE id = ?")
         .bind(id)
         .execute(pool)
@@ -152,7 +166,7 @@ pub async fn delete(pool: &SqlitePool, id: &str) -> Result<(), AppError> {
 }
 
 /// 暂停或恢复监控项。
-pub async fn set_enabled(pool: &SqlitePool, id: &str, enabled: bool) -> Result<Monitor, AppError> {
+pub async fn set_enabled(pool: &SqlitePool, id: i64, enabled: bool) -> Result<Monitor, AppError> {
     update(
         pool,
         id,

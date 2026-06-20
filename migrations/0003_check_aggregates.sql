@@ -1,6 +1,6 @@
 CREATE TABLE IF NOT EXISTS check_aggregates (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    monitor_id TEXT NOT NULL,
+    monitor_id INTEGER NOT NULL,
     bucket_size TEXT NOT NULL,
     bucket_start INTEGER NOT NULL,
     bucket_end INTEGER NOT NULL,

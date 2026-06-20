@@ -21,6 +21,12 @@ pub async fn probe(monitor: &Monitor, timeout: Duration) -> Result<CheckResult, 
     } else {
         format!("{}:80", monitor.target)
     };
+    tracing::debug!(
+        monitor_id = monitor.id,
+        target = %target,
+        timeout_ms = timeout.as_millis(),
+        "starting dns probe"
+    );
 
     let addrs = time::timeout(timeout, lookup_host(&target))
         .await
@@ -30,10 +36,20 @@ pub async fn probe(monitor: &Monitor, timeout: Duration) -> Result<CheckResult, 
     let latency_us = started.elapsed().as_micros() as u64;
     let mut observation = ProbeObservation::new(latency_us);
     observation.dns_answers = values;
+    let answer_count = observation.dns_answers.len();
 
-    if is_success(monitor, &observation) {
-        Ok(CheckResult::success(monitor.id.clone(), latency_us))
+    let success = is_success(monitor, &observation);
+    tracing::debug!(
+        monitor_id = monitor.id,
+        answer_count = answer_count,
+        latency_us = latency_us,
+        success = success,
+        "dns probe observed answers"
+    );
+
+    if success {
+        Ok(CheckResult::success(monitor.id, latency_us))
     } else {
-        Ok(CheckResult::failed(monitor.id.clone(), Some(latency_us)))
+        Ok(CheckResult::failed(monitor.id, Some(latency_us)))
     }
 }

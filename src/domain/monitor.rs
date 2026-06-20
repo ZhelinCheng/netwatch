@@ -1,6 +1,5 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use crate::error::AppError;
 
@@ -189,8 +188,8 @@ impl MonitorConfig {
 /// 监控项的完整持久化模型。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Monitor {
-    /// UUID 字符串，便于 API 和 SQLite 直接使用。
-    pub id: String,
+    /// SQLite 自增主键；新监控项写入前为 0。
+    pub id: i64,
     pub name: String,
     pub kind: MonitorKind,
     /// 被探测目标；格式由具体探测器解释。
@@ -236,7 +235,7 @@ pub struct UpdateMonitor {
 }
 
 impl CreateMonitor {
-    /// 将用户输入转换成完整领域模型，并填充 ID 与时间戳。
+    /// 将用户输入转换成完整领域模型，并填充时间戳。
     pub fn into_monitor(self) -> Result<Monitor, AppError> {
         validate_monitor_input(
             &self.name,
@@ -247,7 +246,7 @@ impl CreateMonitor {
 
         let now = Utc::now();
         Ok(Monitor {
-            id: Uuid::new_v4().to_string(),
+            id: 0,
             name: self.name,
             kind: self.kind,
             target: self.target,
@@ -276,14 +275,14 @@ pub fn validate_monitor_input(
             "monitor target is required".to_string(),
         ));
     }
-    if interval_seconds < 5 {
+    if interval_seconds < 2 {
         return Err(AppError::BadRequest(
-            "interval_seconds must be at least 5".to_string(),
+            "interval_seconds must be at least 2".to_string(),
         ));
     }
-    if timeout_seconds == 0 || timeout_seconds >= interval_seconds {
+    if timeout_seconds == 0 || timeout_seconds > interval_seconds {
         return Err(AppError::BadRequest(
-            "timeout_seconds must be greater than 0 and lower than interval_seconds".to_string(),
+            "timeout_seconds must be greater than 0 and not exceed interval_seconds".to_string(),
         ));
     }
     Ok(())

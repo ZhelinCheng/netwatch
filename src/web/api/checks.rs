@@ -68,7 +68,7 @@ pub fn router() -> Router<AppState> {
 
 async fn list(
     State(state): State<AppState>,
-    Path(id): Path<String>,
+    Path(id): Path<i64>,
     Query(query): Query<LimitQuery>,
 ) -> Result<Json<ChecksResponse>, AppError> {
     let (resolution, results) = if query.from.is_some() || query.to.is_some() {
@@ -85,7 +85,7 @@ async fn list(
             ));
         }
 
-        let monitor = monitors::get(state.pool(), &id).await?;
+        let monitor = monitors::get(state.pool(), id).await?;
         let timezone = aggregation_offset(state.config().aggregation_timezone.as_str());
         let today_start = local_day_start_utc(Utc::now(), timezone);
         let minute_cutoff = today_start - Duration::days(7);
@@ -96,7 +96,7 @@ async fn list(
         // 按保留策略分段查询：越旧的数据粒度越粗，最近一天返回原始点。
         append_aggregate_segment(
             state.pool(),
-            &monitor.id,
+            monitor.id,
             query_range,
             TimeRange {
                 from,
@@ -108,7 +108,7 @@ async fn list(
         .await?;
         append_aggregate_segment(
             state.pool(),
-            &monitor.id,
+            monitor.id,
             query_range,
             TimeRange {
                 from: hour_cutoff,
@@ -120,7 +120,7 @@ async fn list(
         .await?;
         append_aggregate_segment(
             state.pool(),
-            &monitor.id,
+            monitor.id,
             query_range,
             TimeRange {
                 from: minute_cutoff,
@@ -132,7 +132,7 @@ async fn list(
         .await?;
         append_raw_segment(
             &state,
-            &monitor.id,
+            monitor.id,
             monitor.interval_seconds,
             query_range,
             today_start,
@@ -145,7 +145,7 @@ async fn list(
     } else {
         // 列表模式服务于详情页“最近结果”，只返回原始数据。
         let limit = query.limit.unwrap_or(100).clamp(1, 1000);
-        let results = checks::list_for_monitor(state.pool(), &id, limit)
+        let results = checks::list_for_monitor(state.pool(), id, limit)
             .await?
             .into_iter()
             .map(CheckSeriesPoint::Raw)
@@ -164,7 +164,7 @@ async fn list(
 /// 查询某一个聚合保留区间，并追加到输出序列。
 async fn append_aggregate_segment(
     pool: &sqlx::SqlitePool,
-    monitor_id: &str,
+    monitor_id: i64,
     query_range: TimeRange,
     segment_range: TimeRange,
     bucket_size: AggregateBucketSize,
@@ -193,7 +193,7 @@ async fn append_aggregate_segment(
 /// 查询最近一天的原始结果，并把尚未 flush 的缓冲结果合并进来。
 async fn append_raw_segment(
     state: &AppState,
-    monitor_id: &str,
+    monitor_id: i64,
     interval_seconds: u64,
     query_range: TimeRange,
     today_start: DateTime<Utc>,
@@ -227,7 +227,7 @@ async fn append_raw_segment(
 
 /// 按监控项间隔填充缺失的 unknown 点，让图表能表现采集空洞。
 fn fill_unknown_points(
-    monitor_id: &str,
+    monitor_id: i64,
     interval_seconds: u64,
     from: DateTime<Utc>,
     to: DateTime<Utc>,
@@ -256,7 +256,7 @@ fn fill_unknown_points(
             distance <= tolerance.num_milliseconds()
         });
         if !has_real_result {
-            results.push(CheckResult::unknown(monitor_id.to_string(), expected_at));
+            results.push(CheckResult::unknown(monitor_id, expected_at));
         }
 
         expected_at += interval;
@@ -397,10 +397,10 @@ mod tests {
     fn fills_missing_points_with_unknown() {
         let from = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
         let to = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 10).unwrap();
-        let mut result = CheckResult::success("m1".into(), 10);
+        let mut result = CheckResult::success(1, 10);
         result.checked_at = from;
 
-        let filled = fill_unknown_points("m1", 5, from, to, vec![result]).unwrap();
+        let filled = fill_unknown_points(1, 5, from, to, vec![result]).unwrap();
 
         assert_eq!(filled.len(), 3);
         assert_eq!(filled[0].status, CheckStatus::Success);
@@ -412,10 +412,10 @@ mod tests {
     fn tolerance_prevents_duplicate_unknown() {
         let from = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
         let to = from;
-        let mut result = CheckResult::success("m1".into(), 10);
+        let mut result = CheckResult::success(1, 10);
         result.checked_at = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 1).unwrap();
 
-        let filled = fill_unknown_points("m1", 5, from, to, vec![result]).unwrap();
+        let filled = fill_unknown_points(1, 5, from, to, vec![result]).unwrap();
 
         assert_eq!(filled.len(), 1);
         assert_eq!(filled[0].status, CheckStatus::Success);

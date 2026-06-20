@@ -34,39 +34,73 @@ async fn create(
     Json(input): Json<CreateMonitor>,
 ) -> Result<Json<Monitor>, AppError> {
     let monitor = input.into_monitor()?;
-    monitors::insert(state.pool(), &monitor).await?;
+    tracing::info!(
+        name = %monitor.name,
+        kind = monitor.kind.as_str(),
+        target = %monitor.target,
+        interval_seconds = monitor.interval_seconds,
+        timeout_seconds = monitor.timeout_seconds,
+        enabled = monitor.enabled,
+        "creating monitor"
+    );
+    let monitor = monitors::insert(state.pool(), &monitor).await?;
+    state.monitor_cache().mark_dirty().await;
+    tracing::info!(monitor_id = monitor.id, name = %monitor.name, "monitor created");
     Ok(Json(monitor))
 }
 
 async fn get_one(
     State(state): State<AppState>,
-    Path(id): Path<String>,
+    Path(id): Path<i64>,
 ) -> Result<Json<Monitor>, AppError> {
-    Ok(Json(monitors::get(state.pool(), &id).await?))
+    Ok(Json(monitors::get(state.pool(), id).await?))
 }
 
 async fn update(
     State(state): State<AppState>,
-    Path(id): Path<String>,
+    Path(id): Path<i64>,
     Json(input): Json<UpdateMonitor>,
 ) -> Result<Json<Monitor>, AppError> {
-    Ok(Json(monitors::update(state.pool(), &id, input).await?))
+    tracing::info!(monitor_id = id, "updating monitor");
+    let monitor = monitors::update(state.pool(), id, input).await?;
+    state.monitor_cache().mark_dirty().await;
+    tracing::info!(
+        monitor_id = monitor.id,
+        name = %monitor.name,
+        enabled = monitor.enabled,
+        interval_seconds = monitor.interval_seconds,
+        timeout_seconds = monitor.timeout_seconds,
+        "monitor updated"
+    );
+    Ok(Json(monitor))
 }
 
-async fn delete_one(State(state): State<AppState>, Path(id): Path<String>) -> Result<(), AppError> {
-    monitors::delete(state.pool(), &id).await
+async fn delete_one(State(state): State<AppState>, Path(id): Path<i64>) -> Result<(), AppError> {
+    tracing::info!(monitor_id = id, "deleting monitor");
+    monitors::delete(state.pool(), id).await?;
+    state.monitor_cache().mark_dirty().await;
+    tracing::info!(monitor_id = id, "monitor deleted");
+    Ok(())
 }
 
 async fn pause(
     State(state): State<AppState>,
-    Path(id): Path<String>,
+    Path(id): Path<i64>,
 ) -> Result<Json<Monitor>, AppError> {
-    Ok(Json(monitors::set_enabled(state.pool(), &id, false).await?))
+    tracing::info!(monitor_id = id, "pausing monitor");
+    let monitor = monitors::set_enabled(state.pool(), id, false).await?;
+    state.monitor_cache().mark_dirty().await;
+    tracing::info!(monitor_id = id, "monitor paused");
+    Ok(Json(monitor))
 }
 
 async fn resume(
     State(state): State<AppState>,
-    Path(id): Path<String>,
+    Path(id): Path<i64>,
 ) -> Result<Json<Monitor>, AppError> {
-    Ok(Json(monitors::set_enabled(state.pool(), &id, true).await?))
+    tracing::info!(monitor_id = id, "resuming monitor");
+    let monitor = monitors::set_enabled(state.pool(), id, true).await?;
+    state.monitor_cache().mark_dirty().await;
+    tracing::info!(monitor_id = id, "monitor resumed");
+    Ok(Json(monitor))
 }

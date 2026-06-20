@@ -6,7 +6,7 @@ ALTER TABLE check_results RENAME TO check_results_old;
 
 CREATE TABLE check_results (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    monitor_id TEXT NOT NULL,
+    monitor_id INTEGER NOT NULL,
     status TEXT NOT NULL,
     latency_us INTEGER,
     checked_at INTEGER NOT NULL,

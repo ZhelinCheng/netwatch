@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS monitors (
-    id TEXT PRIMARY KEY NOT NULL,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     kind TEXT NOT NULL,
     target TEXT NOT NULL,
@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS monitors (
 
 CREATE TABLE IF NOT EXISTS check_results (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    monitor_id TEXT NOT NULL,
+    monitor_id INTEGER NOT NULL,
     status TEXT NOT NULL,
     latency_us INTEGER,
     error TEXT,
@@ -27,7 +27,7 @@ CREATE INDEX IF NOT EXISTS idx_check_results_monitor_checked_at
 
 CREATE TABLE IF NOT EXISTS alert_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    monitor_id TEXT NOT NULL,
+    monitor_id INTEGER NOT NULL,
     kind TEXT NOT NULL,
     message TEXT NOT NULL,
     delivered INTEGER NOT NULL,

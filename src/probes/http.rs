@@ -17,6 +17,12 @@ pub async fn probe(monitor: &Monitor, timeout: Duration) -> Result<CheckResult, 
         .build()
         .map_err(anyhow::Error::from)?;
     let started = Instant::now();
+    tracing::debug!(
+        monitor_id = monitor.id,
+        target = %monitor.target,
+        timeout_ms = timeout.as_millis(),
+        "starting http probe"
+    );
     let response = client
         .get(&monitor.target)
         .send()
@@ -53,9 +59,18 @@ pub async fn probe(monitor: &Monitor, timeout: Duration) -> Result<CheckResult, 
     observation.http_headers = headers;
     observation.http_body = body;
 
-    if is_success(monitor, &observation) {
-        Ok(CheckResult::success(monitor.id.clone(), latency_us))
+    let success = is_success(monitor, &observation);
+    tracing::debug!(
+        monitor_id = monitor.id,
+        status = status,
+        latency_us = latency_us,
+        success = success,
+        "http probe observed response"
+    );
+
+    if success {
+        Ok(CheckResult::success(monitor.id, latency_us))
     } else {
-        Ok(CheckResult::failed(monitor.id.clone(), Some(latency_us)))
+        Ok(CheckResult::failed(monitor.id, Some(latency_us)))
     }
 }

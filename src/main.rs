@@ -32,8 +32,26 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let config = Config::from_env()?;
+    tracing::info!(
+        host = %config.host,
+        port = config.port,
+        database_url = %config.database_url,
+        scheduler_tick_seconds = config.scheduler_tick.as_secs(),
+        check_flush_interval_seconds = config.check_flush_interval.as_secs(),
+        compact_interval_seconds = config.compact_interval.as_secs(),
+        aggregation_timezone = %config.aggregation_timezone,
+        webhook_enabled = config.webhook_url.is_some(),
+        "configuration loaded"
+    );
+
+    tracing::info!(database_url = %config.database_url, "connecting database");
     let pool = db::connect(&config.database_url).await?;
+    tracing::info!("database connected");
     db::migrate(&pool).await?;
+    if std::env::args().any(|arg| arg == "--migrate-only") {
+        tracing::info!("database migrated");
+        return Ok(());
+    }
 
     // AppState 是 Web API、调度器、探测器共享的运行时上下文。
     let state = AppState::new(config.clone(), pool);

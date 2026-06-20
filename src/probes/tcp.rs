@@ -19,6 +19,12 @@ pub async fn probe(
 ) -> Result<CheckResult, AppError> {
     let address = parse_target(&monitor.target)?;
     let started = Instant::now();
+    tracing::debug!(
+        monitor_id = monitor.id,
+        address = %address,
+        timeout_ms = timeout.as_millis(),
+        "starting tcp probe"
+    );
     let mut addresses = time::timeout(timeout, lookup_host(&address))
         .await
         .map_err(|_| AppError::BadRequest("tcp target resolution timed out".to_string()))?
@@ -33,7 +39,7 @@ pub async fn probe(
         .map_err(anyhow::Error::from)?;
 
     Ok(CheckResult::success(
-        monitor.id.clone(),
+        monitor.id,
         started.elapsed().as_micros() as u64,
     ))
 }

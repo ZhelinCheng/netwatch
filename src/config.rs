@@ -37,7 +37,7 @@ impl Config {
         let port = parse_env("NETWATCH_PORT", 4311)?;
         let database_url =
             env::var("NETWATCH_DATABASE_URL").unwrap_or_else(|_| "sqlite://netwatch.db".into());
-        let scheduler_tick = Duration::from_secs(parse_env("NETWATCH_SCHEDULER_TICK_SECONDS", 5)?);
+        let scheduler_tick = Duration::from_secs(parse_env("NETWATCH_SCHEDULER_TICK_SECONDS", 1)?);
         let failure_threshold = parse_env("NETWATCH_FAILURE_THRESHOLD", 3)?;
         let aggregation_timezone = resolve_aggregation_timezone(
             env::var("NETWATCH_AGGREGATION_TIMEZONE")
@@ -110,6 +110,7 @@ mod tests {
         let config = Config::from_env().expect("config");
         assert_eq!(config.host, "127.0.0.1");
         assert_eq!(config.port, 4311);
+        assert_eq!(config.scheduler_tick, Duration::from_secs(1));
         assert_eq!(config.failure_threshold, 3);
         assert!(!config.aggregation_timezone.is_empty());
         assert_eq!(config.compact_interval, Duration::from_secs(600));

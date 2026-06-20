@@ -23,11 +23,11 @@ pub async fn evaluate(
     // 只读取阈值数量的最近结果即可判断是否连续失败。
     let recent = checks::list_for_monitor(
         state.pool(),
-        &monitor.id,
+        monitor.id,
         state.config().failure_threshold as i64,
     )
     .await?;
-    let latest_alert = alerts::latest_for_monitor(state.pool(), &monitor.id).await?;
+    let latest_alert = alerts::latest_for_monitor(state.pool(), monitor.id).await?;
 
     let event = if result.status == CheckStatus::Failed
         && recent.len() == state.config().failure_threshold as usize
@@ -38,7 +38,7 @@ pub async fn evaluate(
         ) {
         Some(AlertEvent {
             id: None,
-            monitor_id: monitor.id.clone(),
+            monitor_id: monitor.id,
             kind: AlertKind::Triggered,
             message: format!("{} is failing", monitor.name),
             delivered: false,
@@ -52,7 +52,7 @@ pub async fn evaluate(
     {
         Some(AlertEvent {
             id: None,
-            monitor_id: monitor.id.clone(),
+            monitor_id: monitor.id,
             kind: AlertKind::Recovered,
             message: format!("{} has recovered", monitor.name),
             delivered: false,
@@ -63,11 +63,40 @@ pub async fn evaluate(
     };
 
     if let Some(mut event) = event {
-        event.delivered = notify::send(state, monitor, &event).await.unwrap_or(false);
+        tracing::info!(
+            monitor_id = monitor.id,
+            name = %monitor.name,
+            alert_kind = event.kind.as_str(),
+            "alert event generated"
+        );
+        event.delivered = match notify::send(state, monitor, &event).await {
+            Ok(delivered) => delivered,
+            Err(error) => {
+                tracing::warn!(
+                    ?error,
+                    monitor_id = monitor.id,
+                    alert_kind = event.kind.as_str(),
+                    "alert notification failed"
+                );
+                false
+            }
+        };
         alerts::insert(state.pool(), &event).await?;
+        tracing::info!(
+            monitor_id = monitor.id,
+            alert_kind = event.kind.as_str(),
+            delivered = event.delivered,
+            "alert event persisted"
+        );
         return Ok(Some(event));
     }
 
+    tracing::debug!(
+        monitor_id = monitor.id,
+        status = result.status.as_str(),
+        recent_count = recent.len(),
+        "alert evaluation produced no event"
+    );
     Ok(None)
 }
 
@@ -79,7 +108,7 @@ mod tests {
     fn triggered_alert_is_not_repeated() {
         let latest = Some(AlertEvent {
             id: Some(1),
-            monitor_id: "m1".into(),
+            monitor_id: 1,
             kind: AlertKind::Triggered,
             message: "down".into(),
             delivered: true,

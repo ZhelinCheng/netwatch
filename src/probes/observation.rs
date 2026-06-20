@@ -126,7 +126,7 @@ mod tests {
     fn monitor(kind: MonitorKind, config: MonitorConfig) -> Monitor {
         let now = chrono::Utc::now();
         Monitor {
-            id: "m1".into(),
+            id: 1,
             name: "m1".into(),
             kind,
             target: "example.com".into(),

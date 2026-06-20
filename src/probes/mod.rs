@@ -11,6 +11,8 @@ pub mod tcp;
 
 use std::time::Duration;
 
+use chrono::Utc;
+
 use crate::{
     domain::{
         check::CheckResult,
@@ -22,6 +24,7 @@ use crate::{
 /// 执行一次探测并返回标准化结果。
 pub async fn run(monitor: &Monitor) -> Result<CheckResult, AppError> {
     let timeout = Duration::from_secs(monitor.timeout_seconds);
+    let checked_at = Utc::now();
     let result = match monitor.kind {
         MonitorKind::Http => http::probe(monitor, timeout).await,
         MonitorKind::Ping => icmp::probe(monitor, timeout).await,
@@ -29,5 +32,17 @@ pub async fn run(monitor: &Monitor) -> Result<CheckResult, AppError> {
         MonitorKind::Tcp => tcp::probe(monitor, timeout).await,
     };
 
-    Ok(result.unwrap_or_else(|_| CheckResult::failed(monitor.id.clone(), None)))
+    let mut result = result.unwrap_or_else(|error| {
+        tracing::warn!(
+            ?error,
+            monitor_id = monitor.id,
+            kind = monitor.kind.as_str(),
+            target = %monitor.target,
+            "probe failed before producing result"
+        );
+        CheckResult::failed(monitor.id, None)
+    });
+    // 调度间隔以探测开始时间为准，避免探测耗时把下一次 5 秒 tick 挤到 10 秒后。
+    result.checked_at = checked_at;
+    Ok(result)
 }

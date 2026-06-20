@@ -8,6 +8,7 @@ const INIT_SQL: &str = include_str!("../../migrations/0001_init.sql");
 const SIMPLIFY_CHECK_RESULTS_SQL: &str =
     include_str!("../../migrations/0002_simplify_check_results.sql");
 const CHECK_AGGREGATES_SQL: &str = include_str!("../../migrations/0003_check_aggregates.sql");
+const INTEGER_MONITOR_IDS_SQL: &str = include_str!("../../migrations/0004_integer_monitor_ids.sql");
 
 /// 依次执行初始化 SQL 中的语句。
 pub async fn run(pool: &SqlitePool) -> anyhow::Result<()> {
@@ -26,6 +27,7 @@ pub async fn run(pool: &SqlitePool) -> anyhow::Result<()> {
         ("0001_init", INIT_SQL),
         ("0002_simplify_check_results", SIMPLIFY_CHECK_RESULTS_SQL),
         ("0003_check_aggregates", CHECK_AGGREGATES_SQL),
+        ("0004_integer_monitor_ids", INTEGER_MONITOR_IDS_SQL),
     ] {
         let applied: Option<(String,)> =
             sqlx::query_as("SELECT name FROM _netwatch_migrations WHERE name = ?")
@@ -33,15 +35,18 @@ pub async fn run(pool: &SqlitePool) -> anyhow::Result<()> {
                 .fetch_optional(pool)
                 .await?;
         if applied.is_some() {
+            tracing::debug!(migration = name, "database migration already applied");
             continue;
         }
 
+        tracing::info!(migration = name, "applying database migration");
         execute_statements(pool, sql).await?;
         sqlx::query("INSERT INTO _netwatch_migrations (name, applied_at) VALUES (?, ?)")
             .bind(name)
             .bind(chrono::Utc::now().timestamp())
             .execute(pool)
             .await?;
+        tracing::info!(migration = name, "database migration applied");
     }
 
     Ok(())

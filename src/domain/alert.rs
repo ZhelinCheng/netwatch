@@ -37,7 +37,7 @@ impl From<&str> for AlertKind {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AlertEvent {
     pub id: Option<i64>,
-    pub monitor_id: String,
+    pub monitor_id: i64,
     pub kind: AlertKind,
     pub message: String,
     pub delivered: bool,

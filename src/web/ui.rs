@@ -79,7 +79,7 @@ const INDEX_HTML: &str = r#"<!doctype html>
             <option value="ping">Ping</option>
           </select>
           <input name="target" placeholder="目标，例如 https://example.com" required />
-          <input name="interval_seconds" type="number" min="5" value="60" />
+          <input name="interval_seconds" type="number" min="2" value="60" />
           <input name="timeout_seconds" type="number" min="1" value="10" />
           <button type="submit">创建</button>
         </form>

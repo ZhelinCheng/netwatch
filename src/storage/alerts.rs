@@ -16,7 +16,7 @@ pub async fn insert(pool: &SqlitePool, event: &AlertEvent) -> Result<(), AppErro
         VALUES (?, ?, ?, ?, ?)
         "#,
     )
-    .bind(&event.monitor_id)
+    .bind(event.monitor_id)
     .bind(event.kind.as_str())
     .bind(&event.message)
     .bind(event.delivered)
@@ -46,7 +46,7 @@ pub async fn list(pool: &SqlitePool, limit: i64) -> Result<Vec<AlertEvent>, AppE
 
 pub async fn latest_for_monitor(
     pool: &SqlitePool,
-    monitor_id: &str,
+    monitor_id: i64,
 ) -> Result<Option<AlertEvent>, AppError> {
     let row = sqlx::query(
         r#"
@@ -64,7 +64,7 @@ pub async fn latest_for_monitor(
     row.map(row_to_alert).transpose()
 }
 
-pub async fn delete_for_monitor(pool: &SqlitePool, monitor_id: &str) -> Result<(), AppError> {
+pub async fn delete_for_monitor(pool: &SqlitePool, monitor_id: i64) -> Result<(), AppError> {
     sqlx::query("DELETE FROM alert_events WHERE monitor_id = ?")
         .bind(monitor_id)
         .execute(pool)

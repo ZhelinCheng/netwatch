@@ -36,7 +36,7 @@ impl From<&str> for CheckStatus {
 pub struct CheckResult {
     /// 数据库自增 ID；新结果写入前为空。
     pub id: Option<i64>,
-    pub monitor_id: String,
+    pub monitor_id: i64,
     pub status: CheckStatus,
     /// 成功探测的耗时；失败或 unknown 时可以为空。
     pub latency_us: Option<u64>,
@@ -46,7 +46,7 @@ pub struct CheckResult {
 
 impl CheckResult {
     /// 构造成功探测结果。
-    pub fn success(monitor_id: String, latency_us: u64) -> Self {
+    pub fn success(monitor_id: i64, latency_us: u64) -> Self {
         Self {
             id: None,
             monitor_id,
@@ -57,7 +57,7 @@ impl CheckResult {
     }
 
     /// 构造失败探测结果。
-    pub fn failed(monitor_id: String, latency_us: Option<u64>) -> Self {
+    pub fn failed(monitor_id: i64, latency_us: Option<u64>) -> Self {
         Self {
             id: None,
             monitor_id,
@@ -68,7 +68,7 @@ impl CheckResult {
     }
 
     /// 构造仅用于 API 响应的 unknown 虚拟点。
-    pub fn unknown(monitor_id: String, checked_at: DateTime<Utc>) -> Self {
+    pub fn unknown(monitor_id: i64, checked_at: DateTime<Utc>) -> Self {
         Self {
             id: None,
             monitor_id,
@@ -136,7 +136,7 @@ impl From<&str> for AggregateBucketSize {
 pub struct CheckAggregate {
     /// 数据库自增 ID；聚合 upsert 前为空。
     pub id: Option<i64>,
-    pub monitor_id: String,
+    pub monitor_id: i64,
     pub bucket_size: AggregateBucketSize,
     /// 聚合桶左闭区间起点。
     #[serde(with = "chrono::serde::ts_seconds")]
@@ -194,7 +194,7 @@ pub enum CheckSeriesPoint {
 /// 对外 API 返回的聚合序列点。
 #[derive(Debug, Clone, Serialize)]
 pub struct AggregatePoint {
-    pub monitor_id: String,
+    pub monitor_id: i64,
     pub bucket_size: AggregateBucketSize,
     #[serde(with = "chrono::serde::ts_seconds")]
     pub bucket_start: DateTime<Utc>,
@@ -309,11 +309,11 @@ mod tests {
     #[test]
     fn metrics_include_availability_and_p95() {
         let mut results = vec![
-            CheckResult::success("m1".into(), 10),
-            CheckResult::success("m1".into(), 20),
-            CheckResult::success("m1".into(), 100),
-            CheckResult::failed("m1".into(), None),
-            CheckResult::unknown("m1".into(), Utc::now()),
+            CheckResult::success(1, 10),
+            CheckResult::success(1, 20),
+            CheckResult::success(1, 100),
+            CheckResult::failed(1, None),
+            CheckResult::unknown(1, Utc::now()),
         ];
         for result in &mut results {
             result.checked_at = Utc::now();
@@ -340,7 +340,7 @@ mod tests {
 
     #[test]
     fn check_result_serializes_time_as_timestamp_seconds() {
-        let mut result = CheckResult::success("m1".into(), 10);
+        let mut result = CheckResult::success(1, 10);
         result.checked_at = Utc.with_ymd_and_hms(2026, 6, 17, 8, 9, 10).unwrap();
 
         let value = serde_json::to_value(&result).unwrap();

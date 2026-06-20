@@ -12,7 +12,7 @@ use crate::{
 /// 查询指定时间范围内的聚合结果。
 pub async fn list_for_monitor_between(
     pool: &SqlitePool,
-    monitor_id: &str,
+    monitor_id: i64,
     bucket_size: AggregateBucketSize,
     from: DateTime<Utc>,
     to: DateTime<Utc>,
@@ -41,7 +41,7 @@ pub async fn list_for_monitor_between(
 /// 在事务内查询某天的聚合结果，用于判断是否已经压缩过。
 pub async fn list_for_monitor_day_tx(
     tx: &mut Transaction<'_, Sqlite>,
-    monitor_id: &str,
+    monitor_id: i64,
     bucket_size: AggregateBucketSize,
     day_start: DateTime<Utc>,
     day_end: DateTime<Utc>,
@@ -95,7 +95,7 @@ pub async fn upsert_tx(
             updated_at = excluded.updated_at
         "#,
     )
-    .bind(&aggregate.monitor_id)
+    .bind(aggregate.monitor_id)
     .bind(aggregate.bucket_size.as_str())
     .bind(to_timestamp_seconds(aggregate.bucket_start))
     .bind(to_timestamp_seconds(aggregate.bucket_end))
@@ -117,7 +117,7 @@ pub async fn upsert_tx(
 }
 
 /// 删除某个监控项的全部聚合结果。
-pub async fn delete_for_monitor(pool: &SqlitePool, monitor_id: &str) -> Result<(), AppError> {
+pub async fn delete_for_monitor(pool: &SqlitePool, monitor_id: i64) -> Result<(), AppError> {
     sqlx::query("DELETE FROM check_aggregates WHERE monitor_id = ?")
         .bind(monitor_id)
         .execute(pool)
@@ -129,7 +129,7 @@ pub async fn delete_for_monitor(pool: &SqlitePool, monitor_id: &str) -> Result<(
 /// 删除指定保留边界之前的聚合结果。
 pub async fn delete_older_than(
     pool: &SqlitePool,
-    monitor_id: &str,
+    monitor_id: i64,
     bucket_size: AggregateBucketSize,
     cutoff: DateTime<Utc>,
 ) -> Result<(), AppError> {

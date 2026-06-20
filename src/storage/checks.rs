@@ -9,13 +9,14 @@ use crate::{
     storage::time::{from_timestamp_seconds, to_timestamp_seconds},
 };
 
-/// 批量写入探测结果。
-pub async fn insert_many(pool: &SqlitePool, results: &[CheckResult]) -> Result<(), AppError> {
-    let mut tx = pool.begin().await?;
+/// 在事务内批量写入探测结果。
+pub async fn insert_many_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    results: &[CheckResult],
+) -> Result<(), AppError> {
     for result in results {
-        insert_tx(&mut tx, result).await?;
+        insert_tx(tx, result).await?;
     }
-    tx.commit().await?;
 
     Ok(())
 }
@@ -36,7 +37,7 @@ async fn insert_tx(tx: &mut Transaction<'_, Sqlite>, result: &CheckResult) -> Re
         VALUES (?, ?, ?, ?)
         "#,
     )
-    .bind(&result.monitor_id)
+    .bind(result.monitor_id)
     .bind(result.status.as_str())
     .bind(result.latency_us.map(|value| value as i64))
     .bind(to_timestamp_seconds(result.checked_at))
@@ -48,7 +49,7 @@ async fn insert_tx(tx: &mut Transaction<'_, Sqlite>, result: &CheckResult) -> Re
 
 pub async fn list_for_monitor(
     pool: &SqlitePool,
-    monitor_id: &str,
+    monitor_id: i64,
     limit: i64,
 ) -> Result<Vec<CheckResult>, AppError> {
     // 详情页按最近结果展示，因此这里统一按 checked_at 倒序返回。
@@ -72,7 +73,7 @@ pub async fn list_for_monitor(
 /// 按时间范围列出原始探测结果。
 pub async fn list_for_monitor_between(
     pool: &SqlitePool,
-    monitor_id: &str,
+    monitor_id: i64,
     from: DateTime<Utc>,
     to: DateTime<Utc>,
 ) -> Result<Vec<CheckResult>, AppError> {
@@ -96,7 +97,7 @@ pub async fn list_for_monitor_between(
 /// 在事务内按时间范围列出原始探测结果。
 pub async fn list_for_monitor_between_tx(
     tx: &mut Transaction<'_, Sqlite>,
-    monitor_id: &str,
+    monitor_id: i64,
     from: DateTime<Utc>,
     to: DateTime<Utc>,
 ) -> Result<Vec<CheckResult>, AppError> {
@@ -139,7 +140,7 @@ pub async fn latest_by_monitor(pool: &SqlitePool) -> Result<Vec<CheckResult>, Ap
 }
 
 /// 删除某个监控项的全部原始探测结果。
-pub async fn delete_for_monitor(pool: &SqlitePool, monitor_id: &str) -> Result<(), AppError> {
+pub async fn delete_for_monitor(pool: &SqlitePool, monitor_id: i64) -> Result<(), AppError> {
     sqlx::query("DELETE FROM check_results WHERE monitor_id = ?")
         .bind(monitor_id)
         .execute(pool)
@@ -151,7 +152,7 @@ pub async fn delete_for_monitor(pool: &SqlitePool, monitor_id: &str) -> Result<(
 /// 在事务内删除指定时间范围内的原始探测结果。
 pub async fn delete_for_monitor_between_tx(
     tx: &mut Transaction<'_, Sqlite>,
-    monitor_id: &str,
+    monitor_id: i64,
     from: DateTime<Utc>,
     to: DateTime<Utc>,
 ) -> Result<(), AppError> {
