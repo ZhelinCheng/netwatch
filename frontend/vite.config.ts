@@ -15,6 +15,16 @@ const outPath = path.resolve(__dirname, '..', 'dashboard')
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), babel({ presets: [reactCompilerPreset()] })],
+  server: {
+    host: 'localhost',
+    port: 5173,
+    proxy: {
+      '/api': {
+        target: 'http://127.0.0.1:4311',
+        changeOrigin: true,
+      },
+    },
+  },
   build: {
     outDir: outPath,
     minify: true,

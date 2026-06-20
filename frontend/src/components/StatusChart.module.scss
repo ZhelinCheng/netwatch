@@ -1,0 +1,29 @@
+.chart {
+  min-width: 0;
+}
+
+.timeline {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(4px, 1fr);
+  gap: 2px;
+  height: 16px;
+  margin: 4px 36px 0 46px;
+
+  span {
+    min-width: 3px;
+    border-radius: 2px;
+  }
+}
+
+.success {
+  background: #16a45d;
+}
+
+.failed {
+  background: #ef3434;
+}
+
+.unknown {
+  background: #c7ced8;
+}

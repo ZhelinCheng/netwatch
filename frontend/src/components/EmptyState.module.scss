@@ -1,0 +1,17 @@
+.empty {
+  display: grid;
+  min-height: 160px;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  color: #667085;
+
+  strong {
+    color: #344054;
+    font-size: 15px;
+  }
+
+  span {
+    font-size: 13px;
+  }
+}
