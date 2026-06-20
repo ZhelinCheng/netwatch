@@ -1,12 +1,13 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 use crate::error::AppError;
 
 /// 监控项类型。
 ///
 /// JSON 使用 snake_case，便于 REST API 直接接收 `http`、`dns` 等值。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum MonitorKind {
     Http,
@@ -46,7 +47,7 @@ impl TryFrom<&str> for MonitorKind {
 /// 各协议共享的一组轻量配置。
 ///
 /// 第一版把协议特定字段放在同一个结构里，避免过早引入复杂的枚举配置迁移。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct MonitorConfig {
     /// HTTP 探测期望状态码，默认 200。
     #[serde(default)]
@@ -85,7 +86,7 @@ impl Default for MonitorConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum CompareOp {
     /// 等于。
@@ -116,7 +117,7 @@ impl CompareOp {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TextOp {
     /// 包含目标文本。
@@ -157,7 +158,7 @@ impl TextOp {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SuccessRule {
     /// HTTP 状态码规则。
@@ -186,7 +187,7 @@ impl MonitorConfig {
 }
 
 /// 监控项的完整持久化模型。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Monitor {
     /// SQLite 自增主键；新监控项写入前为 0。
     pub id: i64,
@@ -202,13 +203,15 @@ pub struct Monitor {
     /// 关闭后调度器会跳过该监控项。
     pub enabled: bool,
     #[serde(with = "chrono::serde::ts_seconds")]
+    #[schema(value_type = i64)]
     pub created_at: DateTime<Utc>,
     #[serde(with = "chrono::serde::ts_seconds")]
+    #[schema(value_type = i64)]
     pub updated_at: DateTime<Utc>,
 }
 
 /// 创建监控项的 API 输入。
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct CreateMonitor {
     pub name: String,
     pub kind: MonitorKind,
@@ -224,7 +227,7 @@ pub struct CreateMonitor {
 }
 
 /// 更新监控项的 API 输入；未传字段保持原值。
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct UpdateMonitor {
     pub name: Option<String>,
     pub target: Option<String>,

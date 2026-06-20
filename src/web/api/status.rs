@@ -8,6 +8,7 @@ use axum::{
     routing::get,
 };
 use serde::Serialize;
+use utoipa::ToSchema;
 
 use crate::{
     domain::{check::CheckStatus, monitor::Monitor},
@@ -16,7 +17,7 @@ use crate::{
     storage::{alerts, checks, monitors},
 };
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct Dashboard {
     /// 全部监控项。
     monitors: Vec<Monitor>,
@@ -33,10 +34,20 @@ pub struct Dashboard {
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/dashboard", get(dashboard))
-        .route("/api/status-pages/:slug", get(status_page))
+        .route("/api/status-pages/{slug}", get(status_page))
 }
 
-async fn dashboard(State(state): State<AppState>) -> Result<Json<Dashboard>, AppError> {
+#[utoipa::path(
+    get,
+    path = "/api/dashboard",
+    operation_id = "get_dashboard",
+    tag = "status",
+    responses(
+        (status = 200, description = "Dashboard 汇总数据", body = Dashboard),
+        (status = 500, description = "服务端错误")
+    )
+)]
+pub(crate) async fn dashboard(State(state): State<AppState>) -> Result<Json<Dashboard>, AppError> {
     let monitors = monitors::list(state.pool()).await?;
     let latest: HashMap<_, _> = checks::latest_by_monitor(state.pool())
         .await?
@@ -82,7 +93,18 @@ fn merge_latest(
     latest
 }
 
-async fn status_page(
+#[utoipa::path(
+    get,
+    path = "/api/status-pages/{slug}",
+    operation_id = "get_status_page",
+    tag = "status",
+    params(("slug" = String, Path, description = "状态页标识")),
+    responses(
+        (status = 200, description = "公开状态页数据", body = Dashboard),
+        (status = 500, description = "服务端错误")
+    )
+)]
+pub(crate) async fn status_page(
     State(state): State<AppState>,
     Path(_slug): Path<String>,
 ) -> Result<Json<Dashboard>, AppError> {

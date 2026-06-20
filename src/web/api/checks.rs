@@ -7,6 +7,7 @@ use axum::{
 };
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
+use utoipa::{IntoParams, ToSchema};
 
 use crate::{
     domain::check::{
@@ -19,20 +20,22 @@ use crate::{
     storage::{aggregates, checks, monitors},
 };
 
-#[derive(Debug, Deserialize)]
-struct LimitQuery {
+#[derive(Debug, Deserialize, IntoParams)]
+pub(crate) struct LimitQuery {
     /// 未指定时间范围时返回最近 N 条原始结果。
     limit: Option<i64>,
     /// 指定时间范围时的起点。
     #[serde(default, with = "chrono::serde::ts_seconds_option")]
+    #[param(value_type = i64)]
     from: Option<DateTime<Utc>>,
     /// 指定时间范围时的终点。
     #[serde(default, with = "chrono::serde::ts_seconds_option")]
+    #[param(value_type = i64)]
     to: Option<DateTime<Utc>>,
 }
 
-#[derive(Debug, Serialize)]
-struct ChecksResponse {
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct ChecksResponse {
     /// 当前响应使用的分辨率：raw、minute、hour、day 或 mixed。
     resolution: String,
     /// 序列整体指标。
@@ -63,10 +66,26 @@ struct SeriesOutput {
 }
 
 pub fn router() -> Router<AppState> {
-    Router::new().route("/api/monitors/:id/checks", get(list))
+    Router::new().route("/api/monitors/{id}/checks", get(list))
 }
 
-async fn list(
+#[utoipa::path(
+    get,
+    path = "/api/monitors/{id}/checks",
+    operation_id = "list_monitor_checks",
+    tag = "checks",
+    params(
+        ("id" = i64, Path, description = "监控项 ID"),
+        LimitQuery
+    ),
+    responses(
+        (status = 200, description = "探测结果时间序列", body = ChecksResponse),
+        (status = 400, description = "请求参数无效"),
+        (status = 404, description = "监控项不存在"),
+        (status = 500, description = "服务端错误")
+    )
+)]
+pub(crate) async fn list(
     State(state): State<AppState>,
     Path(id): Path<i64>,
     Query(query): Query<LimitQuery>,

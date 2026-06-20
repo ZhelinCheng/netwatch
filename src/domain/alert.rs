@@ -1,8 +1,9 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 /// 告警事件类型。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum AlertKind {
     Triggered,
@@ -34,7 +35,7 @@ impl From<&str> for AlertKind {
 /// 告警事件。
 ///
 /// 事件采用 append-only 方式记录，方便之后扩展告警历史和通知审计。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct AlertEvent {
     pub id: Option<i64>,
     pub monitor_id: i64,
@@ -42,5 +43,6 @@ pub struct AlertEvent {
     pub message: String,
     pub delivered: bool,
     #[serde(with = "chrono::serde::ts_seconds")]
+    #[schema(value_type = i64)]
     pub created_at: DateTime<Utc>,
 }

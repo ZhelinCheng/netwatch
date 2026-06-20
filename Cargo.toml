@@ -5,16 +5,18 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0"
-axum = "0.7"
+axum = "0.8"
 chrono = { version = "0.4", features = ["serde"] }
-hickory-resolver = { version = "0.24", features = ["tokio-runtime"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+hickory-resolver = { version = "0.26", features = ["tokio"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "sqlite", "chrono"] }
-thiserror = "1.0"
+sqlx = { version = "0.9", features = ["runtime-tokio", "tls-rustls", "sqlite", "chrono"] }
+thiserror = "2.0"
 tokio = { version = "1.0", features = ["full"] }
-tower-http = { version = "0.6", features = ["cors", "fs", "trace"] }
+tower-http = { version = "0.7", features = ["cors", "fs", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 url = "2.5"
+utoipa = { version = "5", features = ["axum_extras", "chrono"] }
+utoipa-swagger-ui = { version = "9", features = ["axum", "vendored"] }

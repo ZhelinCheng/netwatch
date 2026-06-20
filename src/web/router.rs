@@ -9,6 +9,7 @@ use crate::state::AppState;
 pub fn build(state: AppState) -> Router {
     Router::new()
         .merge(crate::web::api::router())
+        .merge(crate::web::docs::router())
         .merge(crate::web::ui::router())
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive())

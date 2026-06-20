@@ -1,8 +1,9 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 /// 单次探测结果状态。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum CheckStatus {
     Success,
@@ -32,7 +33,7 @@ impl From<&str> for CheckStatus {
 }
 
 /// 单次探测结果。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct CheckResult {
     /// 数据库自增 ID；新结果写入前为空。
     pub id: Option<i64>,
@@ -41,6 +42,7 @@ pub struct CheckResult {
     /// 成功探测的耗时；失败或 unknown 时可以为空。
     pub latency_us: Option<u64>,
     #[serde(with = "chrono::serde::ts_seconds")]
+    #[schema(value_type = i64)]
     pub checked_at: DateTime<Utc>,
 }
 
@@ -80,7 +82,7 @@ impl CheckResult {
 }
 
 /// 面向 Dashboard 和详情页的聚合指标。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct LatencyMetrics {
     pub total: usize,
     pub success: usize,
@@ -91,7 +93,7 @@ pub struct LatencyMetrics {
     pub p95_latency_us: Option<u64>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum AggregateBucketSize {
     /// 分钟级聚合，用于最近 7 天的细粒度趋势。
@@ -132,7 +134,7 @@ impl From<&str> for AggregateBucketSize {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct CheckAggregate {
     /// 数据库自增 ID；聚合 upsert 前为空。
     pub id: Option<i64>,
@@ -140,9 +142,11 @@ pub struct CheckAggregate {
     pub bucket_size: AggregateBucketSize,
     /// 聚合桶左闭区间起点。
     #[serde(with = "chrono::serde::ts_seconds")]
+    #[schema(value_type = i64)]
     pub bucket_start: DateTime<Utc>,
     /// 聚合桶右开区间终点。
     #[serde(with = "chrono::serde::ts_seconds")]
+    #[schema(value_type = i64)]
     pub bucket_end: DateTime<Utc>,
     pub success_count: u64,
     pub failed_count: u64,
@@ -156,8 +160,10 @@ pub struct CheckAggregate {
     /// 固定边界的延迟直方图，便于后续展示分布。
     pub latency_buckets: Vec<u64>,
     #[serde(with = "chrono::serde::ts_seconds")]
+    #[schema(value_type = i64)]
     pub created_at: DateTime<Utc>,
     #[serde(with = "chrono::serde::ts_seconds")]
+    #[schema(value_type = i64)]
     pub updated_at: DateTime<Utc>,
 }
 
@@ -182,7 +188,7 @@ impl CheckAggregate {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CheckSeriesPoint {
     /// 最近一天直接返回原始探测点。
@@ -192,13 +198,15 @@ pub enum CheckSeriesPoint {
 }
 
 /// 对外 API 返回的聚合序列点。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct AggregatePoint {
     pub monitor_id: i64,
     pub bucket_size: AggregateBucketSize,
     #[serde(with = "chrono::serde::ts_seconds")]
+    #[schema(value_type = i64)]
     pub bucket_start: DateTime<Utc>,
     #[serde(with = "chrono::serde::ts_seconds")]
+    #[schema(value_type = i64)]
     pub bucket_end: DateTime<Utc>,
     pub success_count: u64,
     pub failed_count: u64,

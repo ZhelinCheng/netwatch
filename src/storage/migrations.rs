@@ -52,7 +52,7 @@ pub async fn run(pool: &SqlitePool) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn execute_statements(pool: &SqlitePool, sql: &str) -> anyhow::Result<()> {
+async fn execute_statements(pool: &SqlitePool, sql: &'static str) -> anyhow::Result<()> {
     let mut connection = pool.acquire().await?;
     for statement in sql.split(';') {
         let statement = statement.trim();

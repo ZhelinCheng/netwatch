@@ -18,18 +18,40 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/monitors", get(list).post(create))
         .route(
-            "/api/monitors/:id",
+            "/api/monitors/{id}",
             get(get_one).patch(update).delete(delete_one),
         )
-        .route("/api/monitors/:id/pause", post(pause))
-        .route("/api/monitors/:id/resume", post(resume))
+        .route("/api/monitors/{id}/pause", post(pause))
+        .route("/api/monitors/{id}/resume", post(resume))
 }
 
-async fn list(State(state): State<AppState>) -> Result<Json<Vec<Monitor>>, AppError> {
+#[utoipa::path(
+    get,
+    path = "/api/monitors",
+    operation_id = "list_monitors",
+    tag = "monitors",
+    responses(
+        (status = 200, description = "监控项列表", body = Vec<Monitor>),
+        (status = 500, description = "服务端错误")
+    )
+)]
+pub(crate) async fn list(State(state): State<AppState>) -> Result<Json<Vec<Monitor>>, AppError> {
     Ok(Json(monitors::list(state.pool()).await?))
 }
 
-async fn create(
+#[utoipa::path(
+    post,
+    path = "/api/monitors",
+    operation_id = "create_monitor",
+    tag = "monitors",
+    request_body = CreateMonitor,
+    responses(
+        (status = 200, description = "创建后的监控项", body = Monitor),
+        (status = 400, description = "请求参数无效"),
+        (status = 500, description = "服务端错误")
+    )
+)]
+pub(crate) async fn create(
     State(state): State<AppState>,
     Json(input): Json<CreateMonitor>,
 ) -> Result<Json<Monitor>, AppError> {
@@ -49,14 +71,40 @@ async fn create(
     Ok(Json(monitor))
 }
 
-async fn get_one(
+#[utoipa::path(
+    get,
+    path = "/api/monitors/{id}",
+    operation_id = "get_monitor",
+    tag = "monitors",
+    params(("id" = i64, Path, description = "监控项 ID")),
+    responses(
+        (status = 200, description = "监控项详情", body = Monitor),
+        (status = 404, description = "监控项不存在"),
+        (status = 500, description = "服务端错误")
+    )
+)]
+pub(crate) async fn get_one(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<Json<Monitor>, AppError> {
     Ok(Json(monitors::get(state.pool(), id).await?))
 }
 
-async fn update(
+#[utoipa::path(
+    patch,
+    path = "/api/monitors/{id}",
+    operation_id = "update_monitor",
+    tag = "monitors",
+    params(("id" = i64, Path, description = "监控项 ID")),
+    request_body = UpdateMonitor,
+    responses(
+        (status = 200, description = "更新后的监控项", body = Monitor),
+        (status = 400, description = "请求参数无效"),
+        (status = 404, description = "监控项不存在"),
+        (status = 500, description = "服务端错误")
+    )
+)]
+pub(crate) async fn update(
     State(state): State<AppState>,
     Path(id): Path<i64>,
     Json(input): Json<UpdateMonitor>,
@@ -75,7 +123,22 @@ async fn update(
     Ok(Json(monitor))
 }
 
-async fn delete_one(State(state): State<AppState>, Path(id): Path<i64>) -> Result<(), AppError> {
+#[utoipa::path(
+    delete,
+    path = "/api/monitors/{id}",
+    operation_id = "delete_monitor",
+    tag = "monitors",
+    params(("id" = i64, Path, description = "监控项 ID")),
+    responses(
+        (status = 200, description = "监控项已删除"),
+        (status = 404, description = "监控项不存在"),
+        (status = 500, description = "服务端错误")
+    )
+)]
+pub(crate) async fn delete_one(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<(), AppError> {
     tracing::info!(monitor_id = id, "deleting monitor");
     monitors::delete(state.pool(), id).await?;
     state.monitor_cache().mark_dirty().await;
@@ -83,7 +146,19 @@ async fn delete_one(State(state): State<AppState>, Path(id): Path<i64>) -> Resul
     Ok(())
 }
 
-async fn pause(
+#[utoipa::path(
+    post,
+    path = "/api/monitors/{id}/pause",
+    operation_id = "pause_monitor",
+    tag = "monitors",
+    params(("id" = i64, Path, description = "监控项 ID")),
+    responses(
+        (status = 200, description = "暂停后的监控项", body = Monitor),
+        (status = 404, description = "监控项不存在"),
+        (status = 500, description = "服务端错误")
+    )
+)]
+pub(crate) async fn pause(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<Json<Monitor>, AppError> {
@@ -94,7 +169,19 @@ async fn pause(
     Ok(Json(monitor))
 }
 
-async fn resume(
+#[utoipa::path(
+    post,
+    path = "/api/monitors/{id}/resume",
+    operation_id = "resume_monitor",
+    tag = "monitors",
+    params(("id" = i64, Path, description = "监控项 ID")),
+    responses(
+        (status = 200, description = "恢复后的监控项", body = Monitor),
+        (status = 404, description = "监控项不存在"),
+        (status = 500, description = "服务端错误")
+    )
+)]
+pub(crate) async fn resume(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<Json<Monitor>, AppError> {
