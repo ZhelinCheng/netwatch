@@ -29,5 +29,25 @@ export default defineConfig({
     outDir: outPath,
     minify: true,
     emptyOutDir: true,
+    rolldownOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined
+          if (id.includes('/react/') || id.includes('/react-dom/') || id.includes('/react-is/')) {
+            return 'react-vendor'
+          }
+          if (id.includes('/@tanstack/react-query/') || id.includes('/react-router-dom/')) {
+            return 'query-router'
+          }
+          if (id.includes('/recharts/') || id.includes('/victory-vendor/')) {
+            return 'charts'
+          }
+          if (id.includes('/lucide-react/')) {
+            return 'icons'
+          }
+          return 'vendor'
+        },
+      },
+    },
   },
 })
