@@ -1,6 +1,7 @@
 import {
   Activity,
   Bell,
+  CalendarDays,
   ChevronRight,
   Grid2X2,
   Menu,
@@ -10,8 +11,9 @@ import {
   Settings,
   ShieldCheck,
 } from 'lucide-react'
+import { useState } from 'react'
 import type { ReactNode } from 'react'
-import { NavLink, Outlet, useLocation } from 'react-router-dom'
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import styles from './Layout.module.scss'
 
 const navItems = [
@@ -37,9 +39,16 @@ interface LayoutProps {
 
 export function Layout({ children }: LayoutProps) {
   const location = useLocation()
+  const navigate = useNavigate()
+  const [searchText, setSearchText] = useState('')
   const title =
     titles[location.pathname] ??
     (location.pathname.startsWith('/monitors/') ? '监控项 / 监控详情' : 'Netwatch')
+
+  function submitSearch() {
+    const keyword = searchText.trim()
+    navigate(keyword ? `/monitors?keyword=${encodeURIComponent(keyword)}` : '/monitors')
+  }
 
   return (
     <div className={styles.shell}>
@@ -84,8 +93,21 @@ export function Layout({ children }: LayoutProps) {
           </div>
           <div className={styles.search}>
             <Search size={16} />
-            <input placeholder="搜索监控项、目标或标签..." />
-            <kbd>⌘ K</kbd>
+            <input
+              placeholder="搜索监控项、目标或标签..."
+              value={searchText}
+              onChange={(event) => setSearchText(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') submitSearch()
+              }}
+            />
+            <button type="button" onClick={submitSearch}>
+              搜索
+            </button>
+          </div>
+          <div className={styles.dateRange}>
+            <CalendarDays size={15} />
+            <span>最近 1 小时</span>
           </div>
           <div className={styles.refresh}>
             <RefreshCcw size={16} />

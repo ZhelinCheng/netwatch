@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Badge } from '../components/Badge'
 import { EmptyState } from '../components/EmptyState'
 import { StatusChart } from '../components/StatusChart'
-import { alertLabel, compactTime, kindLabel, latencyMs, statusLabel } from '../api/format'
+import { alertLabel, compactTime, intervalLabel, kindLabel, latencyMs, statusLabel } from '../api/format'
 import { netwatchApi } from '../api/netwatch'
 import type { Monitor } from '../api/types'
 import styles from './pages.module.scss'
@@ -36,6 +36,7 @@ export function DashboardPage() {
 
   const data = dashboard.data
   const monitors = data?.monitors ?? []
+  const enabledCount = monitors.filter((monitor) => monitor.enabled).length
   const latest = data?.latest ?? {}
   const p95Values = Object.values(latest).flatMap((result) =>
     result.latency_us == null ? [] : [result.latency_us],
@@ -44,21 +45,12 @@ export function DashboardPage() {
 
   return (
     <div className={styles.page}>
-      <div className={styles.pageHeader}>
-        <div>
-          <h1>总览 Dashboard</h1>
-          <p>实时观察监控项健康、延迟和最近告警。</p>
-        </div>
-        <button className={styles.ghostButton} type="button" onClick={() => dashboard.refetch()}>
-          刷新
-        </button>
-      </div>
-
       <section className={styles.gridStats}>
-        <div className={styles.statCard}>
-          <span>全部监控</span>
-          <strong>{data?.total ?? 0}</strong>
-        </div>
+	        <div className={styles.statCard}>
+	          <span>全部监控</span>
+	          <strong>{data?.total ?? 0}</strong>
+	          <small>{enabledCount} / {data?.total ?? 0} 启用/全部</small>
+	        </div>
         <div className={`${styles.statCard} ${styles.statGreen}`}>
           <span>正常</span>
           <strong>{data?.success ?? 0}</strong>
@@ -86,11 +78,13 @@ export function DashboardPage() {
             <h2>延迟与可用性</h2>
             <span>{chartMonitor?.name ?? '暂无监控项'}</span>
           </div>
-          {checks.data?.results?.length ? (
-            <StatusChart points={checks.data.results} />
-          ) : (
-            <EmptyState title="暂无趋势数据" description="等待调度器写入检查结果后将显示延迟曲线。" />
-          )}
+          <div className={styles.chartBody}>
+            {checks.data?.results?.length ? (
+              <StatusChart points={checks.data.results} />
+            ) : (
+              <EmptyState title="暂无趋势数据" description="等待调度器写入检查结果后将显示延迟曲线。" />
+            )}
+          </div>
         </div>
 
         <div className={styles.card}>
@@ -139,7 +133,7 @@ export function DashboardPage() {
                 <th>目标</th>
                 <th>状态</th>
                 <th>延迟</th>
-                <th>可用率</th>
+                <th>最近可用</th>
                 <th>最近检查</th>
                 <th>间隔</th>
               </tr>
@@ -171,7 +165,7 @@ export function DashboardPage() {
                       </span>
                     </td>
                     <td>{compactTime(result?.checked_at)}</td>
-                    <td>{monitor.interval_seconds} 秒</td>
+                    <td>{intervalLabel(monitor.interval_seconds)}</td>
                   </tr>
                 )
               })}

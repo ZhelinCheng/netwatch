@@ -1,6 +1,6 @@
 .page {
   display: grid;
-  gap: 18px;
+  gap: 16px;
 }
 
 .pageHeader {
@@ -8,6 +8,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+  min-height: 38px;
 
   h1 {
     margin: 0;
@@ -17,9 +18,9 @@
   }
 
   p {
-    margin: 4px 0 0;
+    margin: 3px 0 0;
     color: #667085;
-    font-size: 14px;
+    font-size: 13px;
   }
 }
 
@@ -34,30 +35,35 @@
 .filterGroup {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
+}
+
+.cardHeader > .filterGroup {
+  flex: 1;
 }
 
 .search,
 .select,
 .input {
-  height: 38px;
+  height: 36px;
   border: 1px solid #d8e0ea;
   border-radius: 7px;
   background: #fff;
   color: #344054;
   font: inherit;
-  font-size: 14px;
+  font-size: 13px;
   outline: 0;
 }
 
 .search {
-  width: min(280px, 100%);
+  width: min(260px, 100%);
   padding: 0 12px;
 }
 
 .select {
   padding: 0 34px 0 12px;
+  min-width: 132px;
 }
 
 .input {
@@ -72,11 +78,11 @@
   align-items: center;
   justify-content: center;
   gap: 8px;
-  height: 38px;
-  padding: 0 14px;
+  height: 36px;
+  padding: 0 13px;
   border-radius: 7px;
   font: inherit;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
   text-decoration: none;
   cursor: pointer;
@@ -84,9 +90,9 @@
 
 .button {
   border: 1px solid #176df2;
-  background: #176df2;
+  background: linear-gradient(180deg, #1976ff 0%, #1267ea 100%);
   color: #fff;
-  box-shadow: 0 8px 18px rgb(23 109 242 / 20%);
+  box-shadow: 0 8px 16px rgb(23 109 242 / 18%);
 }
 
 .ghostButton {
@@ -123,7 +129,7 @@
   border: 1px solid #dde5ef;
   border-radius: 8px;
   background: #fff;
-  box-shadow: 0 10px 32px rgb(15 23 42 / 5%);
+  box-shadow: 0 8px 24px rgb(15 23 42 / 4%);
 }
 
 .cardHeader {
@@ -131,13 +137,19 @@
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 16px 18px;
+  min-height: 56px;
+  padding: 12px 16px;
   border-bottom: 1px solid #edf1f6;
 
   h2 {
     margin: 0;
     color: #101828;
     font-size: 16px;
+  }
+
+  span {
+    color: #475467;
+    font-size: 13px;
   }
 }
 
@@ -148,24 +160,24 @@
 }
 
 .statCard {
-  min-height: 96px;
-  padding: 18px;
+  min-height: 92px;
+  padding: 16px;
   border: 1px solid #dde5ef;
   border-radius: 8px;
   background: #fff;
-  box-shadow: 0 10px 30px rgb(15 23 42 / 4%);
+  box-shadow: 0 8px 22px rgb(15 23 42 / 4%);
 
   span {
     color: #667085;
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 700;
   }
 
   strong {
     display: block;
-    margin-top: 10px;
+    margin-top: 8px;
     color: #101828;
-    font-size: 30px;
+    font-size: 28px;
     line-height: 1;
   }
 
@@ -193,8 +205,25 @@
 
 .dashboardGrid {
   display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(320px, 0.85fr);
-  gap: 16px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+
+  > .card:first-child {
+    grid-column: span 3;
+  }
+
+  > .card:last-child {
+    grid-column: span 2;
+  }
+
+  .cardHeader {
+    height: 56px;
+    min-height: 56px;
+  }
+}
+
+.chartBody {
+  padding: 16px 18px 18px;
 }
 
 .tableWrap {
@@ -205,11 +234,11 @@
   width: 100%;
   min-width: 820px;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: 12px;
 
   th,
   td {
-    padding: 14px 16px;
+    padding: 12px 16px;
     border-bottom: 1px solid #edf1f6;
     text-align: left;
     vertical-align: middle;
@@ -233,12 +262,13 @@
 
   strong {
     color: #1d2939;
+    font-size: 12px;
   }
 
   span {
     overflow: hidden;
     color: #667085;
-    font-size: 12px;
+    font-size: 11px;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -246,7 +276,7 @@
 
 .bar {
   display: inline-flex;
-  width: 78px;
+  width: 74px;
   height: 4px;
   overflow: hidden;
   border-radius: 999px;
@@ -268,7 +298,7 @@
   grid-template-columns: auto 1fr auto;
   gap: 12px;
   align-items: start;
-  padding: 14px 16px;
+  padding: 12px 16px;
   border-bottom: 1px solid #edf1f6;
 
   svg {
@@ -297,7 +327,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 22px;
+  padding: 18px;
 }
 
 .detailTitle {
@@ -329,8 +359,8 @@
 
 .summaryList {
   display: grid;
-  gap: 14px;
-  padding: 18px;
+  gap: 12px;
+  padding: 16px;
 
   div {
     display: grid;
@@ -354,33 +384,44 @@
 .form {
   display: grid;
   gap: 16px;
-  max-width: 920px;
+  width: min(880px, 100%);
+}
+
+.settingsPage {
+  width: min(900px, 100%);
+  margin: 0 auto;
 }
 
 .section {
   border: 1px solid #dde5ef;
   border-radius: 8px;
   background: #fff;
-  box-shadow: 0 10px 32px rgb(15 23 42 / 5%);
+  box-shadow: 0 8px 24px rgb(15 23 42 / 4%);
 }
 
 .sectionBody {
   display: grid;
-  gap: 16px;
-  padding: 18px;
+  gap: 15px;
+  padding: 16px;
 }
 
 .formGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
+  gap: 14px;
 }
 
 .field {
   display: grid;
-  gap: 8px;
+  gap: 7px;
 
   label {
+    color: #344054;
+    font-size: 13px;
+    font-weight: 800;
+  }
+
+  span {
     color: #344054;
     font-size: 13px;
     font-weight: 800;
@@ -400,7 +441,7 @@
   border-radius: 7px;
 
   button {
-    height: 38px;
+    height: 36px;
     border: 0;
     border-right: 1px solid #d8e0ea;
     background: #fff;
@@ -429,7 +470,7 @@
 .ruleRow {
   display: grid;
   grid-template-columns: 1.1fr 0.8fr 1fr auto;
-  gap: 10px;
+  gap: 8px;
 }
 
 .error {
@@ -460,7 +501,7 @@
 
 .configRows {
   display: grid;
-  padding: 0 18px 8px;
+  padding: 0 18px 6px;
 }
 
 .configRow {
@@ -468,7 +509,7 @@
   grid-template-columns: 260px minmax(180px, 1fr) minmax(160px, auto) auto;
   gap: 16px;
   align-items: center;
-  padding: 16px 0;
+  padding: 14px 0;
   border-bottom: 1px solid #edf1f6;
   color: #475467;
   font-size: 13px;
@@ -494,6 +535,11 @@
   .dashboardGrid,
   .twoColumn {
     grid-template-columns: 1fr;
+  }
+
+  .dashboardGrid > .card:first-child,
+  .dashboardGrid > .card:last-child {
+    grid-column: auto;
   }
 }
 

@@ -37,7 +37,7 @@ const groups = [
 
 export function SettingsPage() {
   return (
-    <div className={styles.page}>
+    <div className={`${styles.page} ${styles.settingsPage}`}>
       <div className={styles.pageHeader}>
         <div>
           <h1>设置</h1>

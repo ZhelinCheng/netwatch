@@ -114,8 +114,8 @@ export function MonitorFormPage() {
       setError('目标地址不能为空')
       return
     }
-    if (formInterval < 2) {
-      setError('检查间隔至少为 2 秒')
+    if (formInterval < 5) {
+      setError('检查间隔至少为 5 秒')
       return
     }
     if (formTimeout <= 0 || formTimeout > formInterval) {
@@ -184,8 +184,8 @@ export function MonitorFormPage() {
           <div className={styles.formGrid}>
             <label className={styles.field}>
               <span>检查间隔（秒） *</span>
-              <input className={styles.input} type="number" min={2} value={formInterval} onChange={(event) => update(setInterval, Number(event.target.value))} />
-              <small>最小 2 秒</small>
+              <input className={styles.input} type="number" min={5} value={formInterval} onChange={(event) => update(setInterval, Number(event.target.value))} />
+              <small>最小 5 秒</small>
             </label>
             <label className={styles.field}>
               <span>超时时间（秒） *</span>

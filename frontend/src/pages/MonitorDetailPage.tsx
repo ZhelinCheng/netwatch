@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Badge } from '../components/Badge'
 import { EmptyState } from '../components/EmptyState'
 import { StatusChart } from '../components/StatusChart'
-import { compactTime, dateTime, kindLabel, latencyMs, statusLabel } from '../api/format'
+import { compactTime, dateTime, intervalLabel, kindLabel, latencyMs, statusLabel } from '../api/format'
 import { netwatchApi } from '../api/netwatch'
 import styles from './pages.module.scss'
 
@@ -129,7 +129,7 @@ export function MonitorDetailPage() {
         </div>
         <div className={styles.statCard}>
           <span>检查间隔</span>
-          <strong>{monitor.data.interval_seconds} 秒</strong>
+          <strong>{intervalLabel(monitor.data.interval_seconds)}</strong>
           <small>超时：{monitor.data.timeout_seconds} 秒</small>
         </div>
       </section>

@@ -1,12 +1,12 @@
 import { Edit3, Pause, Play, Plus, Trash2 } from 'lucide-react'
-import { useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Badge } from '../components/Badge'
 import { EmptyState } from '../components/EmptyState'
 import { Pagination } from '../components/Pagination'
 import { Switch } from '../components/Switch'
-import { compactTime, kindLabel, latencyMs, statusLabel } from '../api/format'
+import { compactTime, intervalLabel, kindLabel, latencyMs, statusLabel } from '../api/format'
 import { netwatchApi } from '../api/netwatch'
 import type { Monitor, MonitorKind } from '../api/types'
 import styles from './pages.module.scss'
@@ -17,7 +17,10 @@ function kindTone(kind: MonitorKind) {
 
 export function MonitorsPage() {
   const queryClient = useQueryClient()
-  const [keyword, setKeyword] = useState('')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const initialKeyword = searchParams.get('keyword') ?? ''
+  const [searchInput, setSearchInput] = useState(initialKeyword)
+  const [keyword, setKeyword] = useState(initialKeyword)
   const [kind, setKind] = useState<'all' | MonitorKind>('all')
   const [status, setStatus] = useState<'all' | 'success' | 'failed' | 'unknown'>('all')
   const [enabled, setEnabled] = useState<'all' | 'enabled' | 'disabled'>('all')
@@ -29,6 +32,20 @@ export function MonitorsPage() {
     queryFn: netwatchApi.dashboard,
     refetchInterval: 30_000,
   })
+
+  useEffect(() => {
+    const nextKeyword = searchParams.get('keyword') ?? ''
+    setSearchInput(nextKeyword)
+    setKeyword(nextKeyword)
+    setPage(1)
+  }, [searchParams])
+
+  function submitSearch() {
+    const nextKeyword = searchInput.trim()
+    setKeyword(nextKeyword)
+    setPage(1)
+    setSearchParams(nextKeyword ? { keyword: nextKeyword } : {})
+  }
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['dashboard'] })
 
@@ -81,13 +98,18 @@ export function MonitorsPage() {
           <div className={styles.filterGroup}>
             <input
               className={styles.search}
-              value={keyword}
+              value={searchInput}
               placeholder="搜索名称、目标..."
               onChange={(event) => {
-                setKeyword(event.target.value)
-                setPage(1)
+                setSearchInput(event.target.value)
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') submitSearch()
               }}
             />
+            <button type="button" className={styles.ghostButton} onClick={submitSearch}>
+              搜索
+            </button>
             <select className={styles.select} value={kind} onChange={(event) => setKind(event.target.value as typeof kind)}>
               <option value="all">类型：全部</option>
               <option value="http">HTTP</option>
@@ -158,7 +180,7 @@ export function MonitorsPage() {
                       </span>
                     </td>
                     <td>{compactTime(result?.checked_at)}</td>
-                    <td>{Math.round(monitor.interval_seconds / 60) || monitor.interval_seconds} 分钟</td>
+                    <td>{intervalLabel(monitor.interval_seconds)}</td>
                     <td>
                       <Switch
                         label={`${monitor.enabled ? '暂停' : '启用'} ${monitor.name}`}

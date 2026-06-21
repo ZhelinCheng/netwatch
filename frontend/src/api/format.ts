@@ -59,6 +59,12 @@ export function relativeTime(timestamp?: number | null) {
   return `${Math.floor(hours / 24)} 天前`
 }
 
+export function intervalLabel(seconds: number) {
+  if (seconds < 60) return `${seconds} 秒`
+  if (seconds % 60 === 0) return `${seconds / 60} 分钟`
+  return `${Number((seconds / 60).toFixed(1))} 分钟`
+}
+
 export function availabilityFromLatest(monitors: Monitor[], status: CheckStatus | undefined) {
   if (status === 'success') return 100
   if (status === 'failed') return 0

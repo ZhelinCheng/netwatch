@@ -16,7 +16,7 @@ interface StatusChartProps {
   height?: number
 }
 
-export function StatusChart({ points, height = 260 }: StatusChartProps) {
+export function StatusChart({ points, height = 240 }: StatusChartProps) {
   const data = points
     .map((point) => ({
       time: seriesTimestamp(point),
@@ -29,7 +29,7 @@ export function StatusChart({ points, height = 260 }: StatusChartProps) {
   return (
     <div className={styles.chart}>
       <ResponsiveContainer width="100%" height={height}>
-        <LineChart data={data} margin={{ top: 10, right: 12, bottom: 0, left: 0 }}>
+        <LineChart data={data} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
           <CartesianGrid stroke="#edf1f6" strokeDasharray="3 3" />
           <XAxis
             dataKey="label"

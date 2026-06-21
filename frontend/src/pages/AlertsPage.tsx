@@ -1,4 +1,4 @@
-import { AlertCircle, CheckCircle2, Search } from 'lucide-react'
+import { AlertCircle, CheckCircle2 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Badge } from '../components/Badge'
@@ -12,6 +12,7 @@ import styles from './pages.module.scss'
 export function AlertsPage() {
   const [kind, setKind] = useState<'all' | AlertKind>('all')
   const [monitorId, setMonitorId] = useState('all')
+  const [searchInput, setSearchInput] = useState('')
   const [keyword, setKeyword] = useState('')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
@@ -52,6 +53,11 @@ export function AlertsPage() {
   const pageCount = Math.max(1, Math.ceil(rows.length / pageSize))
   const pagedRows = rows.slice((page - 1) * pageSize, page * pageSize)
 
+  function submitSearch() {
+    setKeyword(searchInput.trim())
+    setPage(1)
+  }
+
   return (
     <div className={styles.page}>
       <div className={styles.pageHeader}>
@@ -78,15 +84,18 @@ export function AlertsPage() {
                 </option>
               ))}
             </select>
-            <div className={styles.filterGroup}>
-              <Search size={16} />
-              <input
-                className={styles.search}
-                placeholder="搜索监控项、目标或错误信息..."
-                value={keyword}
-                onChange={(event) => setKeyword(event.target.value)}
-              />
-            </div>
+            <input
+              className={styles.search}
+              placeholder="搜索监控项、目标或错误信息..."
+              value={searchInput}
+              onChange={(event) => setSearchInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') submitSearch()
+              }}
+            />
+            <button type="button" className={styles.ghostButton} onClick={submitSearch}>
+              搜索
+            </button>
           </div>
           <button className={styles.ghostButton} type="button" onClick={() => alerts.refetch()}>
             刷新
