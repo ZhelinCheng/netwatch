@@ -1,11 +1,13 @@
 //! 探测结果查询 API。
 
+use std::collections::BTreeMap;
+
 use axum::{
     Json, Router,
     extract::{Path, Query, State},
     routing::get,
 };
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Duration, FixedOffset, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
@@ -15,7 +17,9 @@ use crate::{
         LatencyMetrics,
     },
     error::AppError,
-    scheduler::compact::{aggregation_offset, local_day_start_utc},
+    scheduler::compact::{
+        aggregate_raw_window, aggregation_offset, local_day_start_utc, local_hour_start_utc,
+    },
     state::AppState,
     storage::{aggregates, checks, monitors},
 };
@@ -36,11 +40,11 @@ pub(crate) struct LimitQuery {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct ChecksResponse {
-    /// 当前响应使用的分辨率：raw、minute、hour、day 或 mixed。
+    /// 当前响应使用的分辨率：minute、hour 或 day；最近列表模式仍为 raw。
     resolution: String,
     /// 序列整体指标。
     metrics: LatencyMetrics,
-    /// 原始点和聚合点混合后的时间序列。
+    /// 最近列表模式返回原始点，时间范围查询返回单一粒度聚合点。
     results: Vec<CheckSeriesPoint>,
 }
 
@@ -48,21 +52,6 @@ pub(crate) struct ChecksResponse {
 struct TimeRange {
     from: DateTime<Utc>,
     to: DateTime<Utc>,
-}
-
-impl TimeRange {
-    /// 计算两个时间范围的交集，空区间直接跳过。
-    fn overlap(self, other: Self) -> Option<Self> {
-        let from = self.from.max(other.from);
-        let to = self.to.min(other.to);
-        (from < to).then_some(Self { from, to })
-    }
-}
-
-#[derive(Default)]
-struct SeriesOutput {
-    series: Vec<CheckSeriesPoint>,
-    resolutions: Vec<&'static str>,
 }
 
 pub fn router() -> Router<AppState> {
@@ -110,57 +99,11 @@ pub(crate) async fn list(
         let minute_cutoff = today_start - Duration::days(7);
         let hour_cutoff = today_start - Duration::days(30);
         let query_range = TimeRange { from, to };
-        let mut output = SeriesOutput::default();
+        let bucket_size = bucket_size_for_range(query_range, minute_cutoff, hour_cutoff);
+        let results =
+            list_aggregate_series(&state, &monitor, bucket_size, query_range, timezone).await?;
 
-        // 按保留策略分段查询：越旧的数据粒度越粗，最近一天返回原始点。
-        append_aggregate_segment(
-            state.pool(),
-            monitor.id,
-            query_range,
-            TimeRange {
-                from,
-                to: hour_cutoff,
-            },
-            AggregateBucketSize::Day,
-            &mut output,
-        )
-        .await?;
-        append_aggregate_segment(
-            state.pool(),
-            monitor.id,
-            query_range,
-            TimeRange {
-                from: hour_cutoff,
-                to: minute_cutoff,
-            },
-            AggregateBucketSize::Hour,
-            &mut output,
-        )
-        .await?;
-        append_aggregate_segment(
-            state.pool(),
-            monitor.id,
-            query_range,
-            TimeRange {
-                from: minute_cutoff,
-                to: today_start,
-            },
-            AggregateBucketSize::Minute,
-            &mut output,
-        )
-        .await?;
-        append_raw_segment(
-            &state,
-            monitor.id,
-            monitor.interval_seconds,
-            query_range,
-            today_start,
-            &mut output,
-        )
-        .await?;
-
-        output.series.sort_by_key(series_time);
-        (resolution_label(&output.resolutions), output.series)
+        (bucket_size.as_str().to_string(), results)
     } else {
         // 列表模式服务于详情页“最近结果”，只返回原始数据。
         let limit = query.limit.unwrap_or(100).clamp(1, 1000);
@@ -180,139 +123,106 @@ pub(crate) async fn list(
     }))
 }
 
-/// 查询某一个聚合保留区间，并追加到输出序列。
-async fn append_aggregate_segment(
-    pool: &sqlx::SqlitePool,
-    monitor_id: i64,
-    query_range: TimeRange,
-    segment_range: TimeRange,
-    bucket_size: AggregateBucketSize,
-    output: &mut SeriesOutput,
-) -> Result<(), AppError> {
-    let Some(range) = query_range.overlap(segment_range) else {
-        return Ok(());
-    };
-
-    let aggregates =
-        aggregates::list_for_monitor_between(pool, monitor_id, bucket_size, range.from, range.to)
-            .await?;
-    if !aggregates.is_empty() {
-        output.resolutions.push(bucket_size.as_str());
+/// 根据查询起点选择单一聚合粒度，避免同一个响应混合多种分辨率。
+fn bucket_size_for_range(
+    range: TimeRange,
+    minute_cutoff: DateTime<Utc>,
+    hour_cutoff: DateTime<Utc>,
+) -> AggregateBucketSize {
+    if range.from >= minute_cutoff {
+        AggregateBucketSize::Minute
+    } else if range.from >= hour_cutoff {
+        AggregateBucketSize::Hour
+    } else {
+        AggregateBucketSize::Day
     }
-    output.series.extend(
-        aggregates
-            .into_iter()
-            .map(AggregatePoint::from)
-            .map(CheckSeriesPoint::Aggregate),
-    );
-
-    Ok(())
 }
 
-/// 查询最近一天的原始结果，并把尚未 flush 的缓冲结果合并进来。
-async fn append_raw_segment(
+/// 查询单一粒度的聚合序列，并用最近仍保留的 raw 数据生成同粒度临时桶覆盖未完成窗口。
+async fn list_aggregate_series(
     state: &AppState,
-    monitor_id: i64,
-    interval_seconds: u64,
-    query_range: TimeRange,
-    today_start: DateTime<Utc>,
-    output: &mut SeriesOutput,
-) -> Result<(), AppError> {
-    let from = query_range.from.max(today_start);
-    let to = query_range.to;
-    if from > to {
-        return Ok(());
+    monitor: &crate::domain::monitor::Monitor,
+    bucket_size: AggregateBucketSize,
+    range: TimeRange,
+    timezone: FixedOffset,
+) -> Result<Vec<CheckSeriesPoint>, AppError> {
+    let mut by_start = BTreeMap::new();
+    let query_from = bucket_floor(range.from, bucket_size, timezone);
+    for aggregate in aggregates::list_for_monitor_between(
+        state.pool(),
+        monitor.id,
+        bucket_size,
+        query_from,
+        range.to,
+    )
+    .await?
+    {
+        by_start.insert(aggregate.bucket_start, aggregate);
     }
 
-    let mut real_results =
-        checks::list_for_monitor_between(state.pool(), monitor_id, from, to).await?;
-    real_results.extend(
-        state
-            .check_buffer()
-            .list_for_monitor_between(monitor_id, from, to)
-            .await,
-    );
-    real_results.sort_by_key(|result| result.checked_at);
-    let results = fill_unknown_points(monitor_id, interval_seconds, from, to, real_results)?;
-    if !results.is_empty() {
-        output.resolutions.push("raw");
-    }
-    output
-        .series
-        .extend(results.into_iter().map(CheckSeriesPoint::Raw));
+    let raw_cutoff = Utc::now() - Duration::hours(25);
+    let dynamic_from = range.from.max(raw_cutoff);
+    if dynamic_from <= range.to {
+        let window_start = bucket_floor(dynamic_from, bucket_size, timezone);
+        let window_end = bucket_ceil(range.to, bucket_size, timezone);
+        let mut raw_results =
+            checks::list_for_monitor_between(state.pool(), monitor.id, window_start, window_end)
+                .await?;
+        raw_results.extend(
+            state
+                .check_buffer()
+                .list_for_monitor_between(monitor.id, window_start, window_end)
+                .await,
+        );
 
-    Ok(())
-}
-
-/// 按监控项间隔填充缺失的 unknown 点，让图表能表现采集空洞。
-fn fill_unknown_points(
-    monitor_id: i64,
-    interval_seconds: u64,
-    from: DateTime<Utc>,
-    to: DateTime<Utc>,
-    mut results: Vec<CheckResult>,
-) -> Result<Vec<CheckResult>, AppError> {
-    let interval = Duration::seconds(interval_seconds as i64);
-    let tolerance = Duration::milliseconds(((interval_seconds as i64) * 1000 / 2).max(1));
-    let mut expected_at = from;
-    let mut expected_count = 0usize;
-    let mut unknown_results = Vec::new();
-    results.sort_by_key(|result| result.checked_at);
-    let mut cursor = 0usize;
-
-    while expected_at <= to {
-        expected_count += 1;
-        if expected_count > 50_000 {
-            return Err(AppError::BadRequest(
-                "time range produces more than 50000 expected points".to_string(),
-            ));
-        }
-
-        // 允许半个 interval 的抖动，避免调度 tick 和网络耗时造成重复补点。
-        let window_start = expected_at - tolerance;
-        let window_end = expected_at + tolerance;
-        while results
-            .get(cursor)
-            .is_some_and(|result| result.checked_at < window_start)
+        for aggregate in
+            aggregate_raw_window(monitor, bucket_size, window_start, window_end, &raw_results)
         {
-            cursor += 1;
+            if aggregate.bucket_end > range.from && aggregate.bucket_start <= range.to {
+                by_start.insert(aggregate.bucket_start, aggregate);
+            }
         }
-        let has_real_result = results
-            .get(cursor)
-            .is_some_and(|result| result.checked_at <= window_end);
-        if !has_real_result {
-            unknown_results.push(CheckResult::unknown(monitor_id, expected_at));
+    }
+
+    Ok(by_start
+        .into_values()
+        .filter(|aggregate| aggregate.bucket_end > range.from && aggregate.bucket_start <= range.to)
+        .map(AggregatePoint::from)
+        .map(CheckSeriesPoint::Aggregate)
+        .collect())
+}
+
+fn bucket_floor(
+    value: DateTime<Utc>,
+    bucket_size: AggregateBucketSize,
+    timezone: FixedOffset,
+) -> DateTime<Utc> {
+    match bucket_size {
+        AggregateBucketSize::Minute => {
+            let timestamp = value.timestamp();
+            Utc.timestamp_opt(timestamp - timestamp.rem_euclid(60), 0)
+                .single()
+                .expect("valid minute timestamp")
         }
-
-        expected_at += interval;
-    }
-
-    results.extend(unknown_results);
-    results.sort_by_key(|result| result.checked_at);
-    Ok(results)
-}
-
-/// 返回序列点用于排序的时间。
-fn series_time(point: &CheckSeriesPoint) -> DateTime<Utc> {
-    match point {
-        CheckSeriesPoint::Raw(result) => result.checked_at,
-        CheckSeriesPoint::Aggregate(aggregate) => aggregate.bucket_start,
+        AggregateBucketSize::Hour => local_hour_start_utc(value, timezone),
+        AggregateBucketSize::Day => local_day_start_utc(value, timezone),
     }
 }
 
-/// 生成响应中的分辨率标签。
-fn resolution_label(resolutions: &[&str]) -> String {
-    let mut unique = resolutions.to_vec();
-    unique.sort_unstable();
-    unique.dedup();
-    match unique.as_slice() {
-        [] => "raw".to_string(),
-        [resolution] => (*resolution).to_string(),
-        _ => "mixed".to_string(),
+fn bucket_ceil(
+    value: DateTime<Utc>,
+    bucket_size: AggregateBucketSize,
+    timezone: FixedOffset,
+) -> DateTime<Utc> {
+    let floor = bucket_floor(value, bucket_size, timezone);
+    if floor == value {
+        floor
+    } else {
+        floor + Duration::seconds(bucket_size.seconds())
     }
 }
 
-/// 从原始点和聚合点混合序列中计算总览指标。
+/// 从原始点或聚合点序列中计算总览指标。
 fn metrics_from_series(series: &[CheckSeriesPoint]) -> LatencyMetrics {
     let mut totals = AggregateTotals::default();
 
@@ -326,7 +236,7 @@ fn metrics_from_series(series: &[CheckSeriesPoint]) -> LatencyMetrics {
     totals.into_metrics()
 }
 
-/// 混合序列的临时汇总器。
+/// 序列指标的临时汇总器。
 #[derive(Default)]
 struct AggregateTotals {
     total: usize,
@@ -415,60 +325,47 @@ fn percentile(values: &[u64], quantile: f64) -> Option<u64> {
 mod tests {
     use chrono::TimeZone;
 
-    use crate::domain::check::CheckStatus;
+    use crate::domain::check::CheckResult;
 
     use super::*;
 
     #[test]
-    fn fills_missing_points_with_unknown() {
+    fn range_bucket_selection_and_metrics_cover_aggregate_series() {
         let from = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
-        let to = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 10).unwrap();
-        let mut result = CheckResult::success(1, 10);
-        result.checked_at = from;
-
-        let filled = fill_unknown_points(1, 5, from, to, vec![result]).unwrap();
-
-        assert_eq!(filled.len(), 3);
-        assert_eq!(filled[0].status, CheckStatus::Success);
-        assert_eq!(filled[1].status, CheckStatus::Unknown);
-        assert_eq!(filled[2].status, CheckStatus::Unknown);
-    }
-
-    #[test]
-    fn tolerance_prevents_duplicate_unknown() {
-        let from = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
-        let to = from;
-        let mut result = CheckResult::success(1, 10);
-        result.checked_at = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 1).unwrap();
-
-        let filled = fill_unknown_points(1, 5, from, to, vec![result]).unwrap();
-
-        assert_eq!(filled.len(), 1);
-        assert_eq!(filled[0].status, CheckStatus::Success);
-    }
-
-    #[test]
-    fn range_overlap_resolution_and_metrics_cover_mixed_series() {
-        let from = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
-        let to = from + Duration::minutes(10);
-        let range = TimeRange { from, to };
-        assert!(range.overlap(TimeRange { from: to, to }).is_none());
         assert_eq!(
-            range
-                .overlap(TimeRange {
-                    from: from + Duration::minutes(5),
-                    to: to + Duration::minutes(5),
-                })
-                .unwrap()
-                .from,
-            from + Duration::minutes(5)
+            bucket_size_for_range(
+                TimeRange {
+                    from,
+                    to: from + Duration::hours(1),
+                },
+                from - Duration::days(1),
+                from - Duration::days(30),
+            ),
+            AggregateBucketSize::Minute
         );
-        assert_eq!(resolution_label(&[]), "raw");
-        assert_eq!(resolution_label(&["raw"]), "raw");
-        assert_eq!(resolution_label(&["raw", "minute"]), "mixed");
+        assert_eq!(
+            bucket_size_for_range(
+                TimeRange {
+                    from: from - Duration::days(10),
+                    to: from,
+                },
+                from - Duration::days(7),
+                from - Duration::days(30),
+            ),
+            AggregateBucketSize::Hour
+        );
+        assert_eq!(
+            bucket_size_for_range(
+                TimeRange {
+                    from: from - Duration::days(40),
+                    to: from,
+                },
+                from - Duration::days(7),
+                from - Duration::days(30),
+            ),
+            AggregateBucketSize::Day
+        );
 
-        let mut raw = CheckResult::success(1, 10);
-        raw.checked_at = from;
         let aggregate = AggregatePoint {
             monitor_id: 1,
             bucket_size: AggregateBucketSize::Minute,
@@ -485,30 +382,16 @@ mod tests {
             latency_count: 2,
             latency_sum_us: 40,
         };
-        let series = vec![
-            CheckSeriesPoint::Aggregate(aggregate),
-            CheckSeriesPoint::Raw(raw),
-        ];
+        let series = vec![CheckSeriesPoint::Aggregate(aggregate)];
 
         let metrics = metrics_from_series(&series);
 
-        assert_eq!(series_time(&series[0]), from + Duration::minutes(1));
-        assert_eq!(metrics.total, 5);
-        assert_eq!(metrics.success, 3);
+        assert_eq!(metrics.total, 4);
+        assert_eq!(metrics.success, 2);
         assert_eq!(metrics.failed, 1);
         assert_eq!(metrics.unknown, 1);
-        assert_eq!(metrics.average_latency_us, Some(50.0 / 3.0));
+        assert_eq!(metrics.average_latency_us, Some(20.0));
         assert_eq!(metrics.p95_latency_us, Some(30));
-    }
-
-    #[test]
-    fn fill_unknown_points_rejects_too_many_expected_points() {
-        let from = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
-        let to = from + Duration::seconds(50_001);
-
-        let error = fill_unknown_points(1, 1, from, to, Vec::new()).unwrap_err();
-
-        assert!(matches!(error, AppError::BadRequest(_)));
     }
 
     #[tokio::test]
@@ -553,8 +436,14 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(ranged.resolution, "raw");
+        assert_eq!(ranged.resolution, "minute");
         assert!(!ranged.results.is_empty());
+        assert!(
+            ranged
+                .results
+                .iter()
+                .all(|point| matches!(point, CheckSeriesPoint::Aggregate(_)))
+        );
 
         let error = list(
             State(state),

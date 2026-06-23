@@ -69,7 +69,8 @@ impl CheckResult {
         }
     }
 
-    /// 构造仅用于 API 响应的 unknown 虚拟点。
+    /// 构造仅用于测试的 unknown 虚拟点。
+    #[cfg(test)]
     pub fn unknown(monitor_id: i64, checked_at: DateTime<Utc>) -> Self {
         Self {
             id: None,
@@ -191,9 +192,9 @@ impl CheckAggregate {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CheckSeriesPoint {
-    /// 最近一天直接返回原始探测点。
+    /// 最近列表模式返回原始探测点。
     Raw(CheckResult),
-    /// 更早的数据返回预计算聚合点，避免长时间范围查询过大。
+    /// 时间范围查询返回单一粒度聚合点，避免长时间范围查询过大。
     Aggregate(AggregatePoint),
 }
 
@@ -371,7 +372,10 @@ mod tests {
         assert_eq!(AggregateBucketSize::Day.seconds(), 86_400);
         assert_eq!(AggregateBucketSize::from("hour"), AggregateBucketSize::Hour);
         assert_eq!(AggregateBucketSize::from("day"), AggregateBucketSize::Day);
-        assert_eq!(AggregateBucketSize::from("other"), AggregateBucketSize::Minute);
+        assert_eq!(
+            AggregateBucketSize::from("other"),
+            AggregateBucketSize::Minute
+        );
     }
 
     #[test]
