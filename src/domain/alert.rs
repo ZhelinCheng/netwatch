@@ -46,3 +46,24 @@ pub struct AlertEvent {
     #[schema(value_type = i64)]
     pub created_at: DateTime<Utc>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn alert_kind_round_trips_database_strings() {
+        assert_eq!(AlertKind::Triggered.as_str(), "triggered");
+        assert_eq!(AlertKind::Recovered.as_str(), "recovered");
+        assert_eq!(
+            AlertKind::CertificateExpiring.as_str(),
+            "certificate_expiring"
+        );
+        assert_eq!(AlertKind::from("recovered"), AlertKind::Recovered);
+        assert_eq!(
+            AlertKind::from("certificate_expiring"),
+            AlertKind::CertificateExpiring
+        );
+        assert_eq!(AlertKind::from("anything_else"), AlertKind::Triggered);
+    }
+}

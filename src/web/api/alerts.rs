@@ -39,3 +39,47 @@ pub(crate) async fn list(
         alerts::list(state.pool(), query.limit.unwrap_or(50).clamp(1, 500)).await?,
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use axum::extract::{Query, State};
+    use chrono::Utc;
+
+    use crate::{
+        domain::{
+            alert::{AlertEvent, AlertKind},
+            monitor::MonitorKind,
+        },
+        storage::{alerts, monitors},
+        test_support,
+    };
+
+    use super::*;
+
+    #[tokio::test]
+    async fn alert_list_handler_clamps_limit() {
+        let state = test_support::state("api-alerts").await;
+        let monitor = monitors::insert(state.pool(), &test_support::monitor(MonitorKind::Http))
+            .await
+            .unwrap();
+        alerts::insert(
+            state.pool(),
+            &AlertEvent {
+                id: None,
+                monitor_id: monitor.id,
+                kind: AlertKind::Triggered,
+                message: "down".into(),
+                delivered: false,
+                created_at: Utc::now(),
+            },
+        )
+        .await
+        .unwrap();
+
+        let Json(items) = list(State(state), Query(LimitQuery { limit: Some(999) }))
+            .await
+            .unwrap();
+
+        assert_eq!(items.len(), 1);
+    }
+}

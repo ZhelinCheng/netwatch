@@ -86,3 +86,57 @@ fn row_to_alert(row: sqlx::sqlite::SqliteRow) -> Result<AlertEvent, AppError> {
         created_at: from_timestamp_seconds(created_at)?,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use chrono::{Duration, Utc};
+
+    use crate::{
+        domain::{
+            alert::AlertKind,
+            monitor::{MonitorKind},
+        },
+        storage::monitors,
+        test_support,
+    };
+
+    use super::*;
+
+    #[tokio::test]
+    async fn alert_events_can_be_inserted_listed_latest_and_deleted() {
+        let pool = test_support::pool("alerts-crud").await;
+        let monitor = monitors::insert(&pool, &test_support::monitor(MonitorKind::Http))
+            .await
+            .unwrap();
+        let first = AlertEvent {
+            id: None,
+            monitor_id: monitor.id,
+            kind: AlertKind::Triggered,
+            message: "down".into(),
+            delivered: false,
+            created_at: Utc::now(),
+        };
+        let second = AlertEvent {
+            kind: AlertKind::Recovered,
+            message: "up".into(),
+            delivered: true,
+            created_at: first.created_at + Duration::seconds(1),
+            ..first.clone()
+        };
+
+        insert(&pool, &first).await.unwrap();
+        insert(&pool, &second).await.unwrap();
+
+        let listed = list(&pool, 10).await.unwrap();
+        assert_eq!(listed.len(), 2);
+        assert_eq!(listed[0].kind, AlertKind::Recovered);
+        assert!(listed[0].delivered);
+        assert_eq!(
+            latest_for_monitor(&pool, monitor.id).await.unwrap().unwrap().kind,
+            AlertKind::Recovered
+        );
+
+        delete_for_monitor(&pool, monitor.id).await.unwrap();
+        assert!(latest_for_monitor(&pool, monitor.id).await.unwrap().is_none());
+    }
+}

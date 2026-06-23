@@ -201,3 +201,126 @@ fn row_to_monitor(row: sqlx::sqlite::SqliteRow) -> Result<Monitor, AppError> {
         updated_at: from_timestamp_seconds(updated_at)?,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        domain::{
+            check::CheckResult,
+            monitor::{MonitorConfig, MonitorKind},
+        },
+        storage::{alerts, checks},
+        test_support,
+    };
+
+    use super::*;
+
+    #[tokio::test]
+    async fn monitor_crud_updates_enabled_and_deletes_missing_as_not_found() {
+        let pool = test_support::pool("monitors-crud").await;
+        let mut monitor = test_support::monitor(MonitorKind::Http);
+        monitor.name = "first".into();
+
+        let inserted = insert(&pool, &monitor).await.unwrap();
+        assert!(inserted.id > 0);
+        assert_eq!(list(&pool).await.unwrap().len(), 1);
+        assert_eq!(get(&pool, inserted.id).await.unwrap().name, "first");
+
+        let updated = update(
+            &pool,
+            inserted.id,
+            UpdateMonitor {
+                name: Some("second".into()),
+                target: Some("https://example.org".into()),
+                config: Some(MonitorConfig {
+                    expected_status: Some(204),
+                    ..MonitorConfig::default()
+                }),
+                interval_seconds: None,
+                timeout_seconds: Some(2),
+                enabled: Some(false),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(updated.name, "second");
+        assert_eq!(updated.timeout_seconds, 2);
+        assert!(!updated.enabled);
+
+        let resumed = set_enabled(&pool, inserted.id, true).await.unwrap();
+        assert!(resumed.enabled);
+
+        delete(&pool, inserted.id).await.unwrap();
+        assert!(matches!(get(&pool, inserted.id).await, Err(AppError::NotFound)));
+        assert!(matches!(delete(&pool, inserted.id).await, Err(AppError::NotFound)));
+    }
+
+    #[tokio::test]
+    async fn changing_interval_clears_dependent_history() {
+        let pool = test_support::pool("monitors-clear-history").await;
+        let monitor = insert(&pool, &test_support::monitor(MonitorKind::Http))
+            .await
+            .unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        checks::insert_many_tx(&mut tx, &[CheckResult::success(monitor.id, 42)])
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        alerts::insert(
+            &pool,
+            &crate::domain::alert::AlertEvent {
+                id: None,
+                monitor_id: monitor.id,
+                kind: crate::domain::alert::AlertKind::Triggered,
+                message: "down".into(),
+                delivered: false,
+                created_at: monitor.created_at,
+            },
+        )
+        .await
+        .unwrap();
+
+        update(
+            &pool,
+            monitor.id,
+            UpdateMonitor {
+                name: None,
+                target: None,
+                config: None,
+                interval_seconds: Some(10),
+                timeout_seconds: None,
+                enabled: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            checks::list_for_monitor(&pool, monitor.id, 10)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            alerts::latest_for_monitor(&pool, monitor.id)
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn get_tx_reads_monitor_inside_transaction() {
+        let pool = test_support::pool("monitors-get-tx").await;
+        let monitor = insert(&pool, &test_support::monitor(MonitorKind::Dns))
+            .await
+            .unwrap();
+        let mut tx = pool.begin().await.unwrap();
+
+        let loaded = get_tx(&mut tx, monitor.id).await.unwrap();
+
+        assert_eq!(loaded.kind, MonitorKind::Dns);
+        tx.commit().await.unwrap();
+    }
+}

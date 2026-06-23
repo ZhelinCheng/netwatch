@@ -27,3 +27,36 @@ pub async fn send(state: &AppState, monitor: &Monitor, event: &AlertEvent) -> an
     );
     Ok(false)
 }
+
+#[cfg(test)]
+mod tests {
+    use chrono::Utc;
+
+    use crate::{
+        domain::{
+            alert::{AlertEvent, AlertKind},
+            monitor::MonitorKind,
+        },
+        test_support,
+    };
+
+    use super::*;
+
+    #[tokio::test]
+    async fn send_skips_external_delivery_when_webhook_is_absent() {
+        let state = test_support::state("notify-skip").await;
+        let monitor = test_support::monitor(MonitorKind::Http);
+        let event = AlertEvent {
+            id: None,
+            monitor_id: monitor.id,
+            kind: AlertKind::Triggered,
+            message: "down".into(),
+            delivered: false,
+            created_at: Utc::now(),
+        };
+
+        let delivered = send(&state, &monitor, &event).await.unwrap();
+
+        assert!(!delivered);
+    }
+}

@@ -191,3 +191,65 @@ pub(crate) async fn resume(
     tracing::info!(monitor_id = id, "monitor resumed");
     Ok(Json(monitor))
 }
+
+#[cfg(test)]
+mod tests {
+    use axum::extract::{Path, State};
+
+    use crate::{
+        domain::monitor::{CreateMonitor, MonitorConfig, MonitorKind, UpdateMonitor},
+        test_support,
+    };
+
+    use super::*;
+
+    #[tokio::test]
+    async fn monitor_handlers_cover_crud_pause_and_resume() {
+        let state = test_support::state("api-monitors").await;
+        let Json(created) = create(
+            State(state.clone()),
+            Json(CreateMonitor {
+                name: "site".into(),
+                kind: MonitorKind::Http,
+                target: "https://example.com".into(),
+                config: MonitorConfig::default(),
+                interval_seconds: 5,
+                timeout_seconds: 1,
+                enabled: true,
+            }),
+        )
+        .await
+        .unwrap();
+        assert!(created.id > 0);
+
+        let Json(items) = list(State(state.clone())).await.unwrap();
+        assert_eq!(items.len(), 1);
+
+        let Json(loaded) = get_one(State(state.clone()), Path(created.id)).await.unwrap();
+        assert_eq!(loaded.name, "site");
+
+        let Json(updated) = update(
+            State(state.clone()),
+            Path(created.id),
+            Json(UpdateMonitor {
+                name: Some("renamed".into()),
+                target: None,
+                config: None,
+                interval_seconds: None,
+                timeout_seconds: None,
+                enabled: None,
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(updated.name, "renamed");
+
+        let Json(paused) = pause(State(state.clone()), Path(created.id)).await.unwrap();
+        assert!(!paused.enabled);
+        let Json(resumed) = resume(State(state.clone()), Path(created.id)).await.unwrap();
+        assert!(resumed.enabled);
+
+        delete_one(State(state.clone()), Path(created.id)).await.unwrap();
+        assert!(get_one(State(state), Path(created.id)).await.is_err());
+    }
+}

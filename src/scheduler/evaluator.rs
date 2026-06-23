@@ -102,6 +102,10 @@ pub async fn evaluate(
 
 #[cfg(test)]
 mod tests {
+    use chrono::Duration;
+
+    use crate::{domain::monitor::MonitorKind, storage::monitors, test_support};
+
     use super::*;
 
     #[test]
@@ -119,5 +123,53 @@ mod tests {
             latest.as_ref().map(|event| &event.kind),
             Some(AlertKind::Triggered)
         ));
+    }
+
+    #[tokio::test]
+    async fn evaluate_triggers_once_after_threshold_and_recovers() {
+        let state = test_support::state("evaluator-flow").await;
+        let monitor = monitors::insert(state.pool(), &test_support::monitor(MonitorKind::Http))
+            .await
+            .unwrap();
+        let now = Utc::now();
+
+        let mut first = CheckResult::failed(monitor.id, None);
+        first.checked_at = now;
+        let mut second = CheckResult::failed(monitor.id, None);
+        second.checked_at = now + Duration::seconds(5);
+        let mut third = CheckResult::failed(monitor.id, None);
+        third.checked_at = now + Duration::seconds(10);
+        persist(&state, &[first.clone(), second.clone(), third.clone()]).await;
+
+        let event = evaluate(&state, &monitor, &third).await.unwrap().unwrap();
+        assert_eq!(event.kind, AlertKind::Triggered);
+        assert!(!event.delivered);
+
+        let repeated = evaluate(&state, &monitor, &third).await.unwrap();
+        assert!(repeated.is_none());
+
+        let mut success = CheckResult::success(monitor.id, 10);
+        success.checked_at = now + Duration::seconds(15);
+        persist(&state, &[success.clone()]).await;
+        let recovered = evaluate(&state, &monitor, &success).await.unwrap().unwrap();
+        assert_eq!(recovered.kind, AlertKind::Recovered);
+    }
+
+    #[tokio::test]
+    async fn evaluate_ignores_incomplete_failure_streak() {
+        let state = test_support::state("evaluator-incomplete").await;
+        let monitor = monitors::insert(state.pool(), &test_support::monitor(MonitorKind::Http))
+            .await
+            .unwrap();
+        let result = CheckResult::failed(monitor.id, None);
+        persist(&state, std::slice::from_ref(&result)).await;
+
+        assert!(evaluate(&state, &monitor, &result).await.unwrap().is_none());
+    }
+
+    async fn persist(state: &AppState, results: &[CheckResult]) {
+        let mut tx = state.pool().begin().await.unwrap();
+        checks::insert_many_tx(&mut tx, results).await.unwrap();
+        tx.commit().await.unwrap();
     }
 }

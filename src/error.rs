@@ -46,3 +46,26 @@ impl IntoResponse for AppError {
             .into_response()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use axum::{body, http::StatusCode};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn app_error_maps_to_http_status_and_json_body() {
+        let response = AppError::BadRequest("bad input".into()).into_response();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert!(std::str::from_utf8(&body).unwrap().contains("bad input"));
+
+        assert_eq!(AppError::NotFound.into_response().status(), StatusCode::NOT_FOUND);
+        assert_eq!(
+            AppError::Other(anyhow::anyhow!("boom"))
+                .into_response()
+                .status(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+    }
+}

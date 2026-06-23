@@ -357,4 +357,50 @@ mod tests {
         assert_eq!(value["latency_us"], json!(10));
         assert!(value.get("latency_ms").is_none());
     }
+
+    #[test]
+    fn status_and_bucket_database_strings_are_stable() {
+        assert_eq!(CheckStatus::Success.as_str(), "success");
+        assert_eq!(CheckStatus::Failed.as_str(), "failed");
+        assert_eq!(CheckStatus::Unknown.as_str(), "unknown");
+        assert_eq!(AggregateBucketSize::Minute.as_str(), "minute");
+        assert_eq!(AggregateBucketSize::Hour.as_str(), "hour");
+        assert_eq!(AggregateBucketSize::Day.as_str(), "day");
+        assert_eq!(AggregateBucketSize::Minute.seconds(), 60);
+        assert_eq!(AggregateBucketSize::Hour.seconds(), 3600);
+        assert_eq!(AggregateBucketSize::Day.seconds(), 86_400);
+        assert_eq!(AggregateBucketSize::from("hour"), AggregateBucketSize::Hour);
+        assert_eq!(AggregateBucketSize::from("day"), AggregateBucketSize::Day);
+        assert_eq!(AggregateBucketSize::from("other"), AggregateBucketSize::Minute);
+    }
+
+    #[test]
+    fn aggregate_point_carries_computed_metrics() {
+        let now = Utc.with_ymd_and_hms(2026, 6, 17, 8, 0, 0).unwrap();
+        let aggregate = CheckAggregate {
+            id: Some(1),
+            monitor_id: 7,
+            bucket_size: AggregateBucketSize::Hour,
+            bucket_start: now,
+            bucket_end: now + chrono::Duration::hours(1),
+            success_count: 3,
+            failed_count: 1,
+            unknown_count: 2,
+            latency_count: 3,
+            latency_sum_us: 90,
+            min_latency_us: Some(10),
+            max_latency_us: Some(50),
+            p95_latency_us: Some(50),
+            latency_buckets: vec![1, 2, 3],
+            created_at: now,
+            updated_at: now,
+        };
+
+        let point = AggregatePoint::from(aggregate);
+
+        assert_eq!(point.availability, 75.0);
+        assert_eq!(point.avg_latency_us, Some(30.0));
+        assert_eq!(point.p95_latency_us, Some(50));
+        assert_eq!(point.latency_count, 3);
+    }
 }

@@ -160,6 +160,17 @@ mod tests {
         assert_eq!(aggregates[0].latency_sum_us, 100);
     }
 
+    #[tokio::test]
+    async fn empty_flush_returns_without_touching_database() {
+        let path = temp_db_path("empty-flush");
+        let database_url = format!("sqlite://{}", path.display());
+        let pool = db::connect(&database_url).await.unwrap();
+        db::migrate(&pool).await.unwrap();
+        let state = AppState::new(test_config(database_url), pool);
+
+        run(state).await.unwrap();
+    }
+
     fn test_config(database_url: String) -> Config {
         Config {
             host: "127.0.0.1".into(),

@@ -74,3 +74,75 @@ pub async fn probe(monitor: &Monitor, timeout: Duration) -> Result<CheckResult, 
         Ok(CheckResult::failed(monitor.id, Some(latency_us)))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use chrono::Utc;
+
+    use crate::domain::{
+        monitor::{CompareOp, MonitorConfig, MonitorKind, SuccessRule, TextOp},
+    };
+
+    use super::*;
+
+    #[test]
+    fn http_rule_detection_reads_body_only_when_needed() {
+        let mut monitor = monitor("http://example.com".into());
+        monitor.config = MonitorConfig {
+            success_rules: Some(vec![
+                SuccessRule::HttpStatus {
+                    op: CompareOp::Eq,
+                    value: 200,
+                },
+                SuccessRule::HttpHeader {
+                    key: "x-state".into(),
+                    op: TextOp::Equals,
+                    value: "ready".into(),
+                },
+                SuccessRule::HttpBody {
+                    op: TextOp::Contains,
+                    value: "ok".into(),
+                },
+            ]),
+            ..MonitorConfig::default()
+        };
+
+        let should_read_body = monitor.config.keyword.is_some()
+            || monitor
+                .config
+                .success_rules
+                .as_deref()
+                .unwrap_or_default()
+                .iter()
+                .any(|rule| matches!(rule, SuccessRule::HttpBody { .. }));
+
+        assert!(should_read_body);
+    }
+
+    #[tokio::test]
+    async fn http_probe_rejects_invalid_url_before_network_io() {
+        let monitor = monitor("not a url".into());
+
+        let error = probe(&monitor, std::time::Duration::from_secs(1))
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, AppError::Other(_)));
+    }
+
+    fn monitor(target: String) -> Monitor {
+        let now = Utc::now();
+        Monitor {
+            id: 10,
+            name: "http".into(),
+            kind: MonitorKind::Http,
+            target,
+            config: MonitorConfig::default(),
+            interval_seconds: 5,
+            timeout_seconds: 1,
+            enabled: true,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+}

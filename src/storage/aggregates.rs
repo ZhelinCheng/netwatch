@@ -187,3 +187,120 @@ fn row_to_aggregate(row: sqlx::sqlite::SqliteRow) -> Result<CheckAggregate, AppE
 fn parse_time(value: i64) -> Result<DateTime<Utc>, AppError> {
     from_timestamp_seconds(value)
 }
+
+#[cfg(test)]
+mod tests {
+    use chrono::{Duration, TimeZone, Utc};
+
+    use crate::{domain::monitor::MonitorKind, storage::monitors, test_support};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn aggregates_can_be_upserted_queried_and_deleted() {
+        let pool = test_support::pool("aggregates-crud").await;
+        let monitor = monitors::insert(&pool, &test_support::monitor(MonitorKind::Http))
+            .await
+            .unwrap();
+        let start = Utc.with_ymd_and_hms(2026, 6, 17, 8, 0, 0).unwrap();
+        let aggregate = aggregate(monitor.id, AggregateBucketSize::Hour, start, 1, 2);
+
+        let mut tx = pool.begin().await.unwrap();
+        upsert_tx(&mut tx, &aggregate).await.unwrap();
+        tx.commit().await.unwrap();
+
+        let listed = list_for_monitor_between(
+            &pool,
+            monitor.id,
+            AggregateBucketSize::Hour,
+            start,
+            start + Duration::hours(2),
+        )
+        .await
+        .unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].latency_buckets, vec![1, 2, 3]);
+
+        let mut changed = aggregate.clone();
+        changed.success_count = 9;
+        changed.updated_at = start + Duration::minutes(1);
+        let mut tx = pool.begin().await.unwrap();
+        upsert_tx(&mut tx, &changed).await.unwrap();
+        let tx_list = list_for_monitor_day_tx(
+            &mut tx,
+            monitor.id,
+            AggregateBucketSize::Hour,
+            start,
+            start + Duration::hours(2),
+        )
+        .await
+        .unwrap();
+        assert_eq!(tx_list[0].success_count, 9);
+        tx.commit().await.unwrap();
+
+        delete_older_than(
+            &pool,
+            monitor.id,
+            AggregateBucketSize::Hour,
+            start + Duration::hours(1),
+        )
+        .await
+        .unwrap();
+        assert!(
+            list_for_monitor_between(
+                &pool,
+                monitor.id,
+                AggregateBucketSize::Hour,
+                start,
+                start + Duration::hours(2),
+            )
+            .await
+            .unwrap()
+            .is_empty()
+        );
+
+        let mut tx = pool.begin().await.unwrap();
+        upsert_tx(&mut tx, &aggregate).await.unwrap();
+        tx.commit().await.unwrap();
+        delete_for_monitor(&pool, monitor.id).await.unwrap();
+        assert!(
+            list_for_monitor_between(
+                &pool,
+                monitor.id,
+                AggregateBucketSize::Hour,
+                start,
+                start + Duration::hours(2),
+            )
+            .await
+            .unwrap()
+            .is_empty()
+        );
+    }
+
+    fn aggregate(
+        monitor_id: i64,
+        bucket_size: AggregateBucketSize,
+        bucket_start: DateTime<Utc>,
+        success_count: u64,
+        failed_count: u64,
+    ) -> CheckAggregate {
+        CheckAggregate {
+            id: None,
+            monitor_id,
+            bucket_size,
+            bucket_start,
+            bucket_end: bucket_start + Duration::seconds(bucket_size.seconds()),
+            success_count,
+            failed_count,
+            unknown_count: 1,
+            latency_count: 3,
+            latency_sum_us: 60,
+            min_latency_us: Some(10),
+            max_latency_us: Some(30),
+            p95_latency_us: Some(30),
+            latency_buckets: vec![1, 2, 3],
+            created_at: bucket_start,
+            updated_at: bucket_start,
+        }
+    }
+}

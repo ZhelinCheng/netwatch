@@ -110,3 +110,60 @@ pub(crate) async fn status_page(
 ) -> Result<Json<Dashboard>, AppError> {
     dashboard(State(state)).await
 }
+
+#[cfg(test)]
+mod tests {
+    use axum::extract::{Path, State};
+    use chrono::{Duration, Utc};
+
+    use crate::{
+        domain::{check::CheckResult, monitor::MonitorKind},
+        storage::{checks, monitors},
+        test_support,
+    };
+
+    use super::*;
+
+    #[tokio::test]
+    async fn dashboard_merges_buffered_latest_and_status_page_reuses_dashboard() {
+        let state = test_support::state("api-dashboard").await;
+        let monitor = monitors::insert(state.pool(), &test_support::monitor(MonitorKind::Http))
+            .await
+            .unwrap();
+        let mut persisted = CheckResult::failed(monitor.id, None);
+        persisted.checked_at = Utc::now();
+        let mut tx = state.pool().begin().await.unwrap();
+        checks::insert_many_tx(&mut tx, &[persisted.clone()])
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        let mut buffered = CheckResult::success(monitor.id, 10);
+        buffered.checked_at = persisted.checked_at + Duration::seconds(5);
+        state.check_buffer().append(buffered).await;
+
+        let Json(data) = dashboard(State(state.clone())).await.unwrap();
+        assert_eq!(data.total, 1);
+        assert_eq!(data.success, 1);
+        assert_eq!(data.failed, 0);
+        assert_eq!(data.unknown, 0);
+        assert_eq!(data.latest.get(&monitor.id).unwrap().latency_us, Some(10));
+
+        let Json(status_data) =
+            status_page(State(state), Path("public".to_string())).await.unwrap();
+        assert_eq!(status_data.total, 1);
+    }
+
+    #[test]
+    fn merge_latest_keeps_newest_result_per_monitor() {
+        let now = Utc::now();
+        let mut old = CheckResult::failed(1, None);
+        old.checked_at = now;
+        let mut new = CheckResult::success(1, 5);
+        new.checked_at = now + Duration::seconds(1);
+
+        let merged = merge_latest(HashMap::from([(1, old)]), HashMap::from([(1, new)]));
+
+        assert_eq!(merged.get(&1).unwrap().latency_us, Some(5));
+    }
+}

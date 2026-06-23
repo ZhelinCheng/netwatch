@@ -63,3 +63,48 @@ fn parse_target(target: &str) -> Result<String, AppError> {
         .ok_or_else(|| AppError::BadRequest("tcp target URL is missing port".to_string()))?;
     Ok(format!("{host}:{port}"))
 }
+
+#[cfg(test)]
+mod tests {
+    use chrono::Utc;
+
+    use crate::domain::monitor::{Monitor, MonitorConfig, MonitorKind};
+
+    use super::*;
+
+    #[test]
+    fn parses_host_port_and_urls() {
+        assert_eq!(parse_target("example.com:443").unwrap(), "example.com:443");
+        assert_eq!(parse_target("https://example.com").unwrap(), "example.com:443");
+        assert_eq!(parse_target("http://example.com:8080").unwrap(), "example.com:8080");
+        assert!(parse_target("example.com").is_err());
+        assert!(parse_target("tcp:///missing-host:80").is_err());
+    }
+
+    #[tokio::test]
+    async fn tcp_probe_reports_bad_target_before_network_io() {
+        let monitor = monitor("example.com".to_string());
+
+        let error = probe(&monitor, std::time::Duration::from_secs(1))
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, AppError::BadRequest(_)));
+    }
+
+    fn monitor(target: String) -> Monitor {
+        let now = Utc::now();
+        Monitor {
+            id: 9,
+            name: "tcp".into(),
+            kind: MonitorKind::Tcp,
+            target,
+            config: MonitorConfig::default(),
+            interval_seconds: 5,
+            timeout_seconds: 1,
+            enabled: true,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+}

@@ -302,3 +302,97 @@ fn default_timeout_seconds() -> u64 {
 fn default_enabled() -> bool {
     true
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn monitor_kind_round_trips_database_strings() {
+        assert_eq!(MonitorKind::Http.as_str(), "http");
+        assert_eq!(MonitorKind::Ping.as_str(), "ping");
+        assert_eq!(MonitorKind::Dns.as_str(), "dns");
+        assert_eq!(MonitorKind::Tcp.as_str(), "tcp");
+        assert_eq!(MonitorKind::try_from("http").unwrap(), MonitorKind::Http);
+        assert_eq!(MonitorKind::try_from("ping").unwrap(), MonitorKind::Ping);
+        assert_eq!(MonitorKind::try_from("dns").unwrap(), MonitorKind::Dns);
+        assert_eq!(MonitorKind::try_from("tcp").unwrap(), MonitorKind::Tcp);
+        assert!(MonitorKind::try_from("smtp").is_err());
+    }
+
+    #[test]
+    fn operators_match_numbers_and_text() {
+        assert!(CompareOp::Eq.matches_u64(10, 10));
+        assert!(CompareOp::Ne.matches_u64(10, 11));
+        assert!(CompareOp::Gt.matches_u64(11, 10));
+        assert!(CompareOp::Gte.matches_u64(10, 10));
+        assert!(CompareOp::Lt.matches_u64(9, 10));
+        assert!(CompareOp::Lte.matches_u64(10, 10));
+
+        assert!(TextOp::Contains.matches("hello world", "world"));
+        assert!(TextOp::Equals.matches("ready", "ready"));
+        assert!(TextOp::NotContains.matches("hello", "world"));
+        assert!(TextOp::NotEquals.matches("ready", "down"));
+        assert!(TextOp::Contains.matches_any(["a", "bc"], "b"));
+        assert!(TextOp::NotEquals.matches_any(["a", "bc"], "z"));
+        assert!(!TextOp::NotContains.matches_any(["a", "bc"], "b"));
+    }
+
+    #[test]
+    fn monitor_config_defaults_and_rule_detection_are_stable() {
+        let config = MonitorConfig::default();
+        assert_eq!(config.dns_record.as_deref(), Some("A"));
+        assert!(!config.has_success_rules());
+
+        let config = MonitorConfig {
+            success_rules: Some(vec![SuccessRule::Latency {
+                op: CompareOp::Lt,
+                value_us: 500,
+            }]),
+            ..MonitorConfig::default()
+        };
+        assert!(config.has_success_rules());
+    }
+
+    #[test]
+    fn create_monitor_fills_runtime_fields_and_validates_input() {
+        let monitor = CreateMonitor {
+            name: "site".into(),
+            kind: MonitorKind::Http,
+            target: "https://example.com".into(),
+            config: MonitorConfig::default(),
+            interval_seconds: 5,
+            timeout_seconds: 1,
+            enabled: true,
+        }
+        .into_monitor()
+        .unwrap();
+
+        assert_eq!(monitor.id, 0);
+        assert_eq!(monitor.kind, MonitorKind::Http);
+        assert!(monitor.enabled);
+
+        assert!(validate_monitor_input("", "x", 5, 1).is_err());
+        assert!(validate_monitor_input("x", " ", 5, 1).is_err());
+        assert!(validate_monitor_input("x", "y", 1, 1).is_err());
+        assert!(validate_monitor_input("x", "y", 5, 0).is_err());
+        assert!(validate_monitor_input("x", "y", 5, 6).is_err());
+    }
+
+    #[test]
+    fn create_monitor_deserializes_defaults_from_api_payload() {
+        let input: CreateMonitor = serde_json::from_value(json!({
+            "name": "site",
+            "kind": "http",
+            "target": "https://example.com"
+        }))
+        .unwrap();
+
+        assert_eq!(input.interval_seconds, 60);
+        assert_eq!(input.timeout_seconds, 10);
+        assert!(input.enabled);
+        assert_eq!(input.config.dns_record.as_deref(), Some("A"));
+    }
+}

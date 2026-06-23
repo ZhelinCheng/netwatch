@@ -185,3 +185,78 @@ fn row_to_check(row: sqlx::sqlite::SqliteRow) -> Result<CheckResult, AppError> {
         checked_at: from_timestamp_seconds(checked_at)?,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use chrono::{Duration, TimeZone, Utc};
+
+    use crate::{
+        domain::{check::CheckStatus, monitor::MonitorKind},
+        storage::monitors,
+        test_support,
+    };
+
+    use super::*;
+
+    #[tokio::test]
+    async fn check_results_can_be_inserted_listed_latest_and_deleted() {
+        let pool = test_support::pool("checks-crud").await;
+        let monitor = monitors::insert(&pool, &test_support::monitor(MonitorKind::Http))
+            .await
+            .unwrap();
+        let base = Utc.with_ymd_and_hms(2026, 6, 17, 8, 0, 0).unwrap();
+        let mut first = CheckResult::success(monitor.id, 10);
+        first.checked_at = base;
+        let mut second = CheckResult::failed(monitor.id, Some(20));
+        second.checked_at = base + Duration::seconds(5);
+
+        let mut tx = pool.begin().await.unwrap();
+        insert_many_tx(&mut tx, &[first.clone(), second.clone()])
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        let recent = list_for_monitor(&pool, monitor.id, 10).await.unwrap();
+        assert_eq!(recent.len(), 2);
+        assert_eq!(recent[0].status, CheckStatus::Failed);
+
+        let ranged = list_for_monitor_between(&pool, monitor.id, base, base + Duration::seconds(5))
+            .await
+            .unwrap();
+        assert_eq!(ranged.len(), 2);
+
+        let latest = latest_by_monitor(&pool).await.unwrap();
+        assert_eq!(latest.len(), 1);
+        assert_eq!(latest[0].status, CheckStatus::Failed);
+
+        let mut tx = pool.begin().await.unwrap();
+        let tx_results =
+            list_for_monitor_between_tx(&mut tx, monitor.id, base, base + Duration::seconds(6))
+                .await
+                .unwrap();
+        assert_eq!(tx_results.len(), 2);
+        delete_for_monitor_between_tx(&mut tx, monitor.id, base, base + Duration::seconds(1))
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        assert_eq!(list_for_monitor(&pool, monitor.id, 10).await.unwrap().len(), 1);
+        delete_for_monitor(&pool, monitor.id).await.unwrap();
+        assert!(list_for_monitor(&pool, monitor.id, 10).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn virtual_unknown_results_are_rejected() {
+        let pool = test_support::pool("checks-unknown").await;
+        let monitor = monitors::insert(&pool, &test_support::monitor(MonitorKind::Http))
+            .await
+            .unwrap();
+        let mut tx = pool.begin().await.unwrap();
+
+        let error = insert_many_tx(&mut tx, &[CheckResult::unknown(monitor.id, Utc::now())])
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, AppError::BadRequest(_)));
+    }
+}

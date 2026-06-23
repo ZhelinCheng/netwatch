@@ -11,6 +11,8 @@ mod probes;
 mod scheduler;
 mod state;
 mod storage;
+#[cfg(test)]
+mod test_support;
 mod web;
 
 use std::net::SocketAddr;

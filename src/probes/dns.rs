@@ -53,3 +53,44 @@ pub async fn probe(monitor: &Monitor, timeout: Duration) -> Result<CheckResult, 
         Ok(CheckResult::failed(monitor.id, Some(latency_us)))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use chrono::Utc;
+
+    use crate::domain::{
+        check::CheckStatus,
+        monitor::{Monitor, MonitorConfig, MonitorKind, SuccessRule, TextOp},
+    };
+
+    use super::*;
+
+    #[tokio::test]
+    async fn dns_probe_resolves_localhost_and_applies_answer_rule() {
+        let now = Utc::now();
+        let monitor = Monitor {
+            id: 11,
+            name: "dns".into(),
+            kind: MonitorKind::Dns,
+            target: "localhost".into(),
+            config: MonitorConfig {
+                success_rules: Some(vec![SuccessRule::DnsAnswer {
+                    op: TextOp::Contains,
+                    value: "127.".into(),
+                }]),
+                ..MonitorConfig::default()
+            },
+            interval_seconds: 5,
+            timeout_seconds: 1,
+            enabled: true,
+            created_at: now,
+            updated_at: now,
+        };
+
+        let result = probe(&monitor, std::time::Duration::from_secs(1))
+            .await
+            .unwrap();
+
+        assert_eq!(result.status, CheckStatus::Success);
+    }
+}

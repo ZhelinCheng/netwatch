@@ -439,4 +439,127 @@ mod tests {
         assert_eq!(filled.len(), 1);
         assert_eq!(filled[0].status, CheckStatus::Success);
     }
+
+    #[test]
+    fn range_overlap_resolution_and_metrics_cover_mixed_series() {
+        let from = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        let to = from + Duration::minutes(10);
+        let range = TimeRange { from, to };
+        assert!(range.overlap(TimeRange { from: to, to }).is_none());
+        assert_eq!(
+            range
+                .overlap(TimeRange {
+                    from: from + Duration::minutes(5),
+                    to: to + Duration::minutes(5),
+                })
+                .unwrap()
+                .from,
+            from + Duration::minutes(5)
+        );
+        assert_eq!(resolution_label(&[]), "raw");
+        assert_eq!(resolution_label(&["raw"]), "raw");
+        assert_eq!(resolution_label(&["raw", "minute"]), "mixed");
+
+        let mut raw = CheckResult::success(1, 10);
+        raw.checked_at = from;
+        let aggregate = AggregatePoint {
+            monitor_id: 1,
+            bucket_size: AggregateBucketSize::Minute,
+            bucket_start: from + Duration::minutes(1),
+            bucket_end: from + Duration::minutes(2),
+            success_count: 2,
+            failed_count: 1,
+            unknown_count: 1,
+            availability: 0.0,
+            avg_latency_us: Some(20.0),
+            p95_latency_us: Some(30),
+            min_latency_us: Some(10),
+            max_latency_us: Some(30),
+            latency_count: 2,
+            latency_sum_us: 40,
+        };
+        let series = vec![
+            CheckSeriesPoint::Aggregate(aggregate),
+            CheckSeriesPoint::Raw(raw),
+        ];
+
+        let metrics = metrics_from_series(&series);
+
+        assert_eq!(series_time(&series[0]), from + Duration::minutes(1));
+        assert_eq!(metrics.total, 5);
+        assert_eq!(metrics.success, 3);
+        assert_eq!(metrics.failed, 1);
+        assert_eq!(metrics.unknown, 1);
+        assert_eq!(metrics.average_latency_us, Some(50.0 / 3.0));
+        assert_eq!(metrics.p95_latency_us, Some(30));
+    }
+
+    #[test]
+    fn fill_unknown_points_rejects_too_many_expected_points() {
+        let from = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        let to = from + Duration::seconds(1001);
+
+        let error = fill_unknown_points(1, 1, from, to, Vec::new()).unwrap_err();
+
+        assert!(matches!(error, AppError::BadRequest(_)));
+    }
+
+    #[tokio::test]
+    async fn list_handler_supports_recent_and_range_queries() {
+        let state = crate::test_support::state("api-checks").await;
+        let monitor = monitors::insert(
+            state.pool(),
+            &crate::test_support::monitor(crate::domain::monitor::MonitorKind::Http),
+        )
+        .await
+        .unwrap();
+        let mut result = CheckResult::success(monitor.id, 10);
+        result.checked_at = Utc::now();
+        let mut tx = state.pool().begin().await.unwrap();
+        checks::insert_many_tx(&mut tx, &[result.clone()])
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        let Json(recent) = list(
+            State(state.clone()),
+            Path(monitor.id),
+            Query(LimitQuery {
+                limit: Some(5),
+                from: None,
+                to: None,
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(recent.resolution, "raw");
+        assert_eq!(recent.results.len(), 1);
+
+        let Json(ranged) = list(
+            State(state.clone()),
+            Path(monitor.id),
+            Query(LimitQuery {
+                limit: None,
+                from: Some(result.checked_at),
+                to: Some(result.checked_at),
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(ranged.resolution, "raw");
+        assert!(!ranged.results.is_empty());
+
+        let error = list(
+            State(state),
+            Path(monitor.id),
+            Query(LimitQuery {
+                limit: None,
+                from: Some(result.checked_at + Duration::seconds(1)),
+                to: Some(result.checked_at),
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(error, AppError::BadRequest(_)));
+    }
 }
