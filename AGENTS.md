@@ -48,6 +48,6 @@ Verification order: `cargo check -> cargo clippy -> cargo test`
 - `CheckResultBuffer` is an in-memory Mutex<Vec>; flush interval (default 60s) controls write frequency
 - Scheduler tick (default 5s) is the scan cycle, not the per-monitor probe interval
 - `compact.rs` flushes buffer before aggregating — don't skip this if modifying compact logic
-- `interval_seconds` minimum is 5 (validated in `domain::monitor::validate_monitor_input`); defaults are interval=60s, timeout=10s
+- `interval_seconds` minimum is 2 (validated in `domain::monitor::validate_monitor_input`); defaults are interval=60s, timeout=10s
 - `timeout_seconds` must be > 0 and < `interval_seconds`
 - Aggregation timezone prefers `NETWATCH_AGGREGATION_TIMEZONE`; when unset, it uses the computer's current local offset and finally falls back to `UTC`

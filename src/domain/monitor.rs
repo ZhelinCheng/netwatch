@@ -377,6 +377,7 @@ mod tests {
         assert!(validate_monitor_input("", "x", 5, 1).is_err());
         assert!(validate_monitor_input("x", " ", 5, 1).is_err());
         assert!(validate_monitor_input("x", "y", 1, 1).is_err());
+        assert!(validate_monitor_input("x", "y", 2, 1).is_ok());
         assert!(validate_monitor_input("x", "y", 5, 0).is_err());
         assert!(validate_monitor_input("x", "y", 5, 6).is_err());
     }
