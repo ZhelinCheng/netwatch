@@ -13,3 +13,11 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .fallback_service(ServeDir::new(DASHBOARD_DIR).fallback(ServeFile::new(DASHBOARD_INDEX)))
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn ui_router_can_be_constructed() {
+        let _router = super::router();
+    }
+}

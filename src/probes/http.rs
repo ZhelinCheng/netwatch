@@ -40,14 +40,7 @@ pub async fn probe(monitor: &Monitor, timeout: Duration) -> Result<CheckResult, 
                 .map(|value| (key.as_str().to_ascii_lowercase(), value.to_string()))
         })
         .collect();
-    let should_read_body = monitor.config.keyword.is_some()
-        || monitor
-            .config
-            .success_rules
-            .as_deref()
-            .unwrap_or_default()
-            .iter()
-            .any(|rule| matches!(rule, crate::domain::monitor::SuccessRule::HttpBody { .. }));
+    let should_read_body = should_read_body(monitor);
     let body = if should_read_body {
         Some(response.text().await.map_err(anyhow::Error::from)?)
     } else {
@@ -73,6 +66,18 @@ pub async fn probe(monitor: &Monitor, timeout: Duration) -> Result<CheckResult, 
     } else {
         Ok(CheckResult::failed(monitor.id, Some(latency_us)))
     }
+}
+
+/// 只有关键字或响应体规则存在时才读取 body，避免无意义地加载大响应。
+fn should_read_body(monitor: &Monitor) -> bool {
+    monitor.config.keyword.is_some()
+        || monitor
+            .config
+            .success_rules
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .any(|rule| matches!(rule, crate::domain::monitor::SuccessRule::HttpBody { .. }))
 }
 
 #[cfg(test)]
@@ -107,16 +112,17 @@ mod tests {
             ..MonitorConfig::default()
         };
 
-        let should_read_body = monitor.config.keyword.is_some()
-            || monitor
-                .config
-                .success_rules
-                .as_deref()
-                .unwrap_or_default()
-                .iter()
-                .any(|rule| matches!(rule, SuccessRule::HttpBody { .. }));
+        assert!(should_read_body(&monitor));
 
-        assert!(should_read_body);
+        monitor.config.success_rules = Some(vec![SuccessRule::HttpHeader {
+            key: "x-state".into(),
+            op: TextOp::Equals,
+            value: "ready".into(),
+        }]);
+        assert!(!should_read_body(&monitor));
+
+        monitor.config.keyword = Some("ok".into());
+        assert!(should_read_body(&monitor));
     }
 
     #[tokio::test]

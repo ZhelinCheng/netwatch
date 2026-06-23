@@ -510,7 +510,11 @@ fn parse_fixed_offset(value: &str) -> Option<FixedOffset> {
 mod tests {
     use chrono::TimeZone;
 
-    use crate::domain::monitor::{MonitorConfig, MonitorKind};
+    use crate::{
+        domain::monitor::{MonitorConfig, MonitorKind},
+        storage::{aggregates, checks, monitors},
+        test_support,
+    };
 
     use super::*;
 
@@ -588,6 +592,121 @@ mod tests {
                 Utc.with_ymd_and_hms(2026, 6, 16, 16, 0, 0).unwrap(),
             )
         );
+    }
+
+    #[tokio::test]
+    async fn rollup_hour_if_due_persists_previous_finished_hour() {
+        let state = test_support::state("compact-hour-due").await;
+        let timezone = aggregation_offset(state.config().aggregation_timezone.as_str());
+        let (hour_start, hour_end) =
+            previous_finished_hour_window(Utc::now(), timezone, flush_grace(&state));
+        let mut monitor = test_support::monitor(MonitorKind::Http);
+        monitor.created_at = hour_start - Duration::hours(1);
+        monitor.updated_at = monitor.created_at;
+        let monitor = monitors::insert(state.pool(), &monitor).await.unwrap();
+        let mut result = CheckResult::success(monitor.id, 123);
+        result.checked_at = hour_start + Duration::seconds(5);
+        persist_results(state.pool(), &[result]).await;
+
+        rollup_hour_if_due(&state).await.unwrap();
+
+        let aggregates = aggregates::list_for_monitor_between(
+            state.pool(),
+            monitor.id,
+            AggregateBucketSize::Hour,
+            hour_start,
+            hour_end,
+        )
+        .await
+        .unwrap();
+        assert_eq!(aggregates.len(), 1);
+        assert_eq!(aggregates[0].success_count, 1);
+        assert_eq!(aggregates[0].latency_sum_us, 123);
+
+        // 第二次调用应发现已存在聚合并跳过写入。
+        rollup_hour_if_due(&state).await.unwrap();
+        assert_eq!(
+            aggregates::list_for_monitor_between(
+                state.pool(),
+                monitor.id,
+                AggregateBucketSize::Hour,
+                hour_start,
+                hour_end,
+            )
+            .await
+            .unwrap()
+            .len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn rollup_day_if_due_persists_previous_finished_day() {
+        let state = test_support::state("compact-day-due").await;
+        let timezone = aggregation_offset(state.config().aggregation_timezone.as_str());
+        let (day_start, day_end) =
+            previous_finished_day_window(Utc::now(), timezone, flush_grace(&state));
+        let mut monitor = test_support::monitor(MonitorKind::Http);
+        monitor.created_at = day_start - Duration::days(1);
+        monitor.updated_at = monitor.created_at;
+        let monitor = monitors::insert(state.pool(), &monitor).await.unwrap();
+        let mut result = CheckResult::failed(monitor.id, None);
+        result.checked_at = day_start + Duration::minutes(10);
+        persist_results(state.pool(), &[result]).await;
+
+        rollup_day_if_due(&state).await.unwrap();
+
+        let aggregates = aggregates::list_for_monitor_between(
+            state.pool(),
+            monitor.id,
+            AggregateBucketSize::Day,
+            day_start,
+            day_end,
+        )
+        .await
+        .unwrap();
+        assert_eq!(aggregates.len(), 1);
+        assert_eq!(aggregates[0].failed_count, 1);
+    }
+
+    #[tokio::test]
+    async fn run_deletes_raw_only_after_day_rollup_exists() {
+        let state = test_support::state("compact-run-delete-raw").await;
+        let timezone = aggregation_offset(state.config().aggregation_timezone.as_str());
+        let today_start = local_day_start_utc(Utc::now(), timezone);
+        let old_day_start = today_start - Duration::days(3);
+        let old_day_end = old_day_start + Duration::days(1);
+        let mut monitor = test_support::monitor(MonitorKind::Http);
+        monitor.created_at = old_day_start;
+        monitor.updated_at = old_day_start;
+        let monitor = monitors::insert(state.pool(), &monitor).await.unwrap();
+        let mut result = CheckResult::success(monitor.id, 88);
+        result.checked_at = old_day_start + Duration::minutes(5);
+        persist_results(state.pool(), &[result]).await;
+
+        let day_aggregate =
+            aggregate_raw_window(&monitor, AggregateBucketSize::Day, old_day_start, old_day_end, &[])
+                .into_iter()
+                .next()
+                .unwrap();
+        let mut tx = state.pool().begin().await.unwrap();
+        aggregates::upsert_tx(&mut tx, &day_aggregate).await.unwrap();
+        tx.commit().await.unwrap();
+
+        run(state.clone()).await.unwrap();
+
+        assert!(
+            checks::list_for_monitor_between(state.pool(), monitor.id, old_day_start, old_day_end)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    async fn persist_results(pool: &sqlx::SqlitePool, results: &[CheckResult]) {
+        let mut tx = pool.begin().await.unwrap();
+        checks::insert_many_tx(&mut tx, results).await.unwrap();
+        tx.commit().await.unwrap();
     }
 
     #[test]

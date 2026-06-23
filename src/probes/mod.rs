@@ -46,3 +46,41 @@ pub async fn run(monitor: &Monitor) -> Result<CheckResult, AppError> {
     result.checked_at = checked_at;
     Ok(result)
 }
+
+#[cfg(test)]
+mod tests {
+    use chrono::Utc;
+
+    use crate::domain::monitor::{MonitorConfig, MonitorKind};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn run_converts_probe_errors_to_failed_results_for_http_and_tcp() {
+        let http = monitor(MonitorKind::Http, "not a url");
+        let http_result = run(&http).await.unwrap();
+        assert_eq!(http_result.monitor_id, http.id);
+        assert_eq!(http_result.status, crate::domain::check::CheckStatus::Failed);
+
+        let tcp = monitor(MonitorKind::Tcp, "missing-port");
+        let tcp_result = run(&tcp).await.unwrap();
+        assert_eq!(tcp_result.monitor_id, tcp.id);
+        assert_eq!(tcp_result.status, crate::domain::check::CheckStatus::Failed);
+    }
+
+    fn monitor(kind: MonitorKind, target: &str) -> Monitor {
+        let now = Utc::now();
+        Monitor {
+            id: 77,
+            name: "probe".into(),
+            kind,
+            target: target.into(),
+            config: MonitorConfig::default(),
+            interval_seconds: 5,
+            timeout_seconds: 1,
+            enabled: true,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+}

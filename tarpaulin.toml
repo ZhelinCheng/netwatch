@@ -1,0 +1,8 @@
+[default]
+exclude-files = [
+  "src/main.rs",
+  "src/notify/webhook.rs",
+  "src/probes/http.rs",
+  "src/probes/icmp.rs",
+  "src/scheduler/mod.rs",
+]

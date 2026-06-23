@@ -90,3 +90,34 @@ async fn tick(state: AppState) -> anyhow::Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use chrono::Utc;
+
+    use crate::{
+        domain::{check::CheckResult, monitor::MonitorKind},
+        storage::{checks, monitors},
+        test_support,
+    };
+
+    use super::*;
+
+    #[tokio::test]
+    async fn tick_refreshes_cache_and_uses_cached_monitors() {
+        let state = test_support::state("scheduler-tick").await;
+        let monitor = monitors::insert(state.pool(), &test_support::monitor(MonitorKind::Http))
+            .await
+            .unwrap();
+        let mut recent = CheckResult::success(monitor.id, 10);
+        recent.checked_at = Utc::now();
+        let mut tx = state.pool().begin().await.unwrap();
+        checks::insert_many_tx(&mut tx, &[recent]).await.unwrap();
+        tx.commit().await.unwrap();
+
+        tick(state.clone()).await.unwrap();
+        assert!(state.monitor_cache().snapshot().await.is_some());
+
+        tick(state).await.unwrap();
+    }
+}

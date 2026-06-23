@@ -22,9 +22,7 @@ pub async fn run_once(state: AppState, monitor: Monitor) -> anyhow::Result<()> {
         .max_by_key(|result| result.checked_at);
     if let Some(last) = latest {
         let elapsed = Utc::now().signed_duration_since(last.checked_at);
-        let interval = Duration::seconds(monitor.interval_seconds as i64);
-        let scheduler_jitter = Duration::milliseconds(500);
-        if elapsed + scheduler_jitter < interval {
+        if should_skip_before_interval(elapsed, monitor.interval_seconds) {
             tracing::debug!(
                 monitor_id = monitor.id,
                 elapsed_milliseconds = elapsed.num_milliseconds(),
@@ -64,4 +62,77 @@ pub async fn run_once(state: AppState, monitor: Monitor) -> anyhow::Result<()> {
     state.check_buffer().append(result).await;
 
     Ok(())
+}
+
+/// 判断距离上次探测是否仍未达到间隔，保留 500ms 调度抖动容忍。
+fn should_skip_before_interval(elapsed: Duration, interval_seconds: u64) -> bool {
+    let interval = Duration::seconds(interval_seconds as i64);
+    let scheduler_jitter = Duration::milliseconds(500);
+    elapsed + scheduler_jitter < interval
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::{Duration, Utc};
+
+    use crate::{
+        domain::{
+            check::CheckResult,
+            monitor::{MonitorKind, UpdateMonitor},
+        },
+        storage::{checks, monitors},
+        test_support,
+    };
+
+    use super::*;
+
+    #[test]
+    fn interval_skip_allows_scheduler_jitter() {
+        assert!(should_skip_before_interval(Duration::milliseconds(4_400), 5));
+        assert!(!should_skip_before_interval(Duration::milliseconds(4_500), 5));
+        assert!(!should_skip_before_interval(Duration::seconds(5), 5));
+    }
+
+    #[tokio::test]
+    async fn run_once_skips_when_recent_result_is_inside_interval() {
+        let state = test_support::state("worker-skip-recent").await;
+        let monitor = monitors::insert(state.pool(), &test_support::monitor(MonitorKind::Http))
+            .await
+            .unwrap();
+        let mut recent = CheckResult::success(monitor.id, 10);
+        recent.checked_at = Utc::now();
+        let mut tx = state.pool().begin().await.unwrap();
+        checks::insert_many_tx(&mut tx, &[recent]).await.unwrap();
+        tx.commit().await.unwrap();
+
+        run_once(state.clone(), monitor).await.unwrap();
+
+        assert!(state.check_buffer().drain_all().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn run_once_skips_freshly_disabled_monitor() {
+        let state = test_support::state("worker-skip-disabled").await;
+        let monitor = monitors::insert(state.pool(), &test_support::monitor(MonitorKind::Http))
+            .await
+            .unwrap();
+        monitors::update(
+            state.pool(),
+            monitor.id,
+            UpdateMonitor {
+                name: None,
+                target: None,
+                config: None,
+                interval_seconds: None,
+                timeout_seconds: None,
+                enabled: Some(false),
+            },
+        )
+        .await
+        .unwrap();
+
+        run_once(state.clone(), monitor).await.unwrap();
+
+        assert!(state.check_buffer().drain_all().await.is_empty());
+    }
 }

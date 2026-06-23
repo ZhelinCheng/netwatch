@@ -15,3 +15,16 @@ pub fn build(state: AppState) -> Router {
         .layer(CorsLayer::permissive())
         .with_state(state)
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::test_support;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn full_router_can_be_constructed() {
+        let state = test_support::state("full-router").await;
+        let _router = build(state);
+    }
+}

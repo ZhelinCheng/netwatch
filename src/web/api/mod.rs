@@ -18,3 +18,11 @@ pub fn router() -> Router<AppState> {
         .merge(alerts::router())
         .merge(status::router())
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn api_router_can_be_constructed() {
+        let _router = super::router();
+    }
+}

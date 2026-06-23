@@ -93,5 +93,7 @@ mod tests {
         assert!(schemas.contains_key("CreateMonitor"));
         assert!(schemas.contains_key("CheckResult"));
         assert!(schemas.contains_key("AlertEvent"));
+
+        let _router = super::router();
     }
 }
