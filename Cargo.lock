@@ -1340,6 +1340,7 @@ dependencies = [
  "axum",
  "chrono",
  "hickory-resolver",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",

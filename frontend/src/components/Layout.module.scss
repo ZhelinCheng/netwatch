@@ -172,43 +172,6 @@
   }
 }
 
-.dateRange {
-  display: inline-flex;
-  align-items: center;
-  justify-self: end;
-  gap: 8px;
-  height: 38px;
-  padding: 0 12px;
-  border: 1px solid #d8e0ea;
-  border-radius: 8px;
-  background: #fff;
-  color: #344054;
-  font-size: 13px;
-  white-space: nowrap;
-
-  svg {
-    color: #344054;
-  }
-}
-
-.refresh {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  justify-self: end;
-  height: 38px;
-  padding: 0 12px;
-  border: 1px solid #d8e0ea;
-  border-radius: 8px;
-  background: #fff;
-  color: #475467;
-  font-size: 13px;
-
-  svg {
-    color: #176df2;
-  }
-}
-
 .content {
   padding: 24px;
 }

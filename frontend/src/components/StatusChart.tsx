@@ -17,10 +17,13 @@ interface StatusChartProps {
 }
 
 export function StatusChart({ points, height = 240 }: StatusChartProps) {
+  const timestamps = points.map(seriesTimestamp).filter(Boolean)
+  const spanSeconds = timestamps.length ? Math.max(...timestamps) - Math.min(...timestamps) : 0
   const data = points
     .map((point) => ({
       time: seriesTimestamp(point),
-      label: compactTime(seriesTimestamp(point)),
+      label: chartTimeLabel(seriesTimestamp(point), spanSeconds),
+      tooltipLabel: chartTooltipLabel(seriesTimestamp(point), spanSeconds),
       latency: seriesLatencyMs(point),
       status: seriesStatus(point),
     }))
@@ -46,7 +49,7 @@ export function StatusChart({ points, height = 240 }: StatusChartProps) {
           />
           <Tooltip
             formatter={(value) => [latencyMs(Number(value) * 1000), '延迟']}
-            labelFormatter={(label) => `检查时间 ${label}`}
+            labelFormatter={(_, payload) => `检查时间 ${payload?.[0]?.payload?.tooltipLabel ?? '-'}`}
             contentStyle={{
               border: '1px solid #dde5ef',
               borderRadius: 8,
@@ -71,4 +74,36 @@ export function StatusChart({ points, height = 240 }: StatusChartProps) {
       </div>
     </div>
   )
+}
+
+function chartTimeLabel(timestamp: number, spanSeconds: number) {
+  if (spanSeconds > 90 * 24 * 60 * 60) {
+    return new Intl.DateTimeFormat('zh-CN', {
+      year: '2-digit',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date(timestamp * 1000))
+  }
+  if (spanSeconds > 24 * 60 * 60) {
+    return new Intl.DateTimeFormat('zh-CN', {
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date(timestamp * 1000))
+  }
+  return compactTime(timestamp)
+}
+
+function chartTooltipLabel(timestamp: number, spanSeconds: number) {
+  if (spanSeconds > 24 * 60 * 60) {
+    return new Intl.DateTimeFormat('zh-CN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }).format(new Date(timestamp * 1000))
+  }
+  return compactTime(timestamp)
 }

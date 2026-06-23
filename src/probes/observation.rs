@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::domain::monitor::{Monitor, MonitorKind, SuccessRule};
+use crate::domain::monitor::{HeaderMatchMode, Monitor, MonitorKind};
 
 /// 各协议探测器提取出的统一观测值。
 ///
@@ -15,33 +15,17 @@ pub struct ProbeObservation {
     pub http_headers: HashMap<String, String>,
     /// DNS 解析得到的 IP 或记录值。
     pub dns_answers: Vec<String>,
-    /// 本次探测总耗时。
-    pub latency_us: u64,
 }
 
 impl ProbeObservation {
-    /// 用统一延迟值初始化观测对象，其它字段由具体探测器补充。
-    pub fn new(latency_us: u64) -> Self {
-        Self {
-            latency_us,
-            ..Self::default()
-        }
+    /// 初始化观测对象，其它字段由具体探测器补充。
+    pub fn new() -> Self {
+        Self::default()
     }
 }
 
 /// 判断一次探测是否满足成功条件。
 pub fn is_success(monitor: &Monitor, observation: &ProbeObservation) -> bool {
-    if monitor.config.has_success_rules() {
-        // 一旦配置了自定义规则，就要求所有规则同时满足，协议默认规则不再参与。
-        return monitor
-            .config
-            .success_rules
-            .as_deref()
-            .unwrap_or_default()
-            .iter()
-            .all(|rule| rule_matches(rule, observation));
-    }
-
     default_success(monitor, observation)
 }
 
@@ -69,10 +53,15 @@ fn default_success(monitor: &Monitor, observation: &ProbeObservation) -> bool {
                 let Some(body) = observation.http_body.as_deref() else {
                     return false;
                 };
-                body.contains(keyword)
-            } else {
-                true
+                let Ok(regex) = regex::Regex::new(keyword) else {
+                    return false;
+                };
+                if !regex.is_match(body) {
+                    return false;
+                }
             }
+
+            headers_match(monitor, observation)
         }
         MonitorKind::Ping | MonitorKind::Tcp => true,
         MonitorKind::Dns => {
@@ -91,34 +80,40 @@ fn default_success(monitor: &Monitor, observation: &ProbeObservation) -> bool {
     }
 }
 
-/// 执行单条自定义成功规则。
-fn rule_matches(rule: &SuccessRule, observation: &ProbeObservation) -> bool {
-    match rule {
-        SuccessRule::HttpStatus { op, value } => observation
-            .http_status
-            .is_some_and(|status| op.matches_u64(status as u64, *value as u64)),
-        SuccessRule::HttpBody { op, value } => observation
-            .http_body
-            .as_deref()
-            .is_some_and(|body| op.matches(body, value)),
-        SuccessRule::HttpHeader { key, op, value } => {
-            let normalized_key = key.to_ascii_lowercase();
-            observation
-                .http_headers
-                .get(&normalized_key)
-                .is_some_and(|header_value| op.matches(header_value, value))
-        }
-        SuccessRule::DnsAnswer { op, value } => {
-            op.matches_any(observation.dns_answers.iter().map(String::as_str), value)
-        }
-        SuccessRule::Latency { op, value_us } => op.matches_u64(observation.latency_us, *value_us),
+fn headers_match(monitor: &Monitor, observation: &ProbeObservation) -> bool {
+    let rules = monitor
+        .config
+        .expected_headers
+        .as_deref()
+        .unwrap_or_default();
+    if rules.is_empty() {
+        return true;
+    }
+
+    let rule_matches = |key: &str, value: &str| {
+        let normalized_key = key.to_ascii_lowercase();
+        let Some(header_value) = observation.http_headers.get(&normalized_key) else {
+            return false;
+        };
+        regex::Regex::new(value)
+            .map(|regex| regex.is_match(header_value))
+            .unwrap_or(false)
+    };
+
+    match monitor.config.header_match_mode {
+        Some(HeaderMatchMode::Any) => rules
+            .iter()
+            .any(|rule| rule_matches(rule.key.trim(), rule.value.trim())),
+        _ => rules
+            .iter()
+            .all(|rule| rule_matches(rule.key.trim(), rule.value.trim())),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::domain::monitor::{
-        CompareOp, Monitor, MonitorConfig, MonitorKind, SuccessRule, TextOp,
+        HeaderMatchMode, HttpHeaderMatch, Monitor, MonitorConfig, MonitorKind,
     };
 
     use super::*;
@@ -142,7 +137,7 @@ mod tests {
     #[test]
     fn http_default_accepts_2xx_and_3xx() {
         let monitor = monitor(MonitorKind::Http, MonitorConfig::default());
-        let mut observation = ProbeObservation::new(10);
+        let mut observation = ProbeObservation::new();
         observation.http_status = Some(302);
         assert!(is_success(&monitor, &observation));
 
@@ -151,25 +146,20 @@ mod tests {
     }
 
     #[test]
-    fn http_rules_check_body_and_headers() {
+    fn http_config_checks_body_and_headers() {
         let monitor = monitor(
             MonitorKind::Http,
             MonitorConfig {
-                success_rules: Some(vec![
-                    SuccessRule::HttpBody {
-                        op: TextOp::Contains,
-                        value: "ok".into(),
-                    },
-                    SuccessRule::HttpHeader {
-                        key: "x-state".into(),
-                        op: TextOp::Equals,
-                        value: "ready".into(),
-                    },
-                ]),
+                keyword: Some("all\\s+ok".into()),
+                expected_headers: Some(vec![HttpHeaderMatch {
+                    key: "x-state".into(),
+                    value: "rea.*".into(),
+                }]),
                 ..MonitorConfig::default()
             },
         );
-        let mut observation = ProbeObservation::new(10);
+        let mut observation = ProbeObservation::new();
+        observation.http_status = Some(200);
         observation.http_body = Some("all ok".into());
         observation
             .http_headers
@@ -178,47 +168,55 @@ mod tests {
     }
 
     #[test]
-    fn dns_rules_check_answers() {
+    fn http_header_match_mode_any_accepts_one_match() {
         let monitor = monitor(
-            MonitorKind::Dns,
+            MonitorKind::Http,
             MonitorConfig {
-                success_rules: Some(vec![SuccessRule::DnsAnswer {
-                    op: TextOp::Equals,
-                    value: "1.1.1.1".into(),
-                }]),
+                expected_headers: Some(vec![
+                    HttpHeaderMatch {
+                        key: "x-state".into(),
+                        value: "missing".into(),
+                    },
+                    HttpHeaderMatch {
+                        key: "content-type".into(),
+                        value: "json".into(),
+                    },
+                ]),
+                header_match_mode: Some(HeaderMatchMode::Any),
                 ..MonitorConfig::default()
             },
         );
-        let mut observation = ProbeObservation::new(10);
-        observation.dns_answers = vec!["1.1.1.1".into()];
+        let mut observation = ProbeObservation::new();
+        observation.http_status = Some(200);
+        observation
+            .http_headers
+            .insert("content-type".into(), "application/json".into());
         assert!(is_success(&monitor, &observation));
     }
 
     #[test]
-    fn latency_rule_is_supported() {
+    fn dns_expected_value_checks_answers() {
         let monitor = monitor(
-            MonitorKind::Http,
+            MonitorKind::Dns,
             MonitorConfig {
-                success_rules: Some(vec![SuccessRule::Latency {
-                    op: CompareOp::Lt,
-                    value_us: 100,
-                }]),
+                expected_value: Some("1.1.1.1".into()),
                 ..MonitorConfig::default()
             },
         );
-        assert!(is_success(&monitor, &ProbeObservation::new(50)));
-        assert!(!is_success(&monitor, &ProbeObservation::new(150)));
+        let mut observation = ProbeObservation::new();
+        observation.dns_answers = vec!["1.1.1.1".into()];
+        assert!(is_success(&monitor, &observation));
     }
 
     #[test]
     fn ping_and_tcp_default_to_probe_success() {
         assert!(is_success(
             &monitor(MonitorKind::Ping, MonitorConfig::default()),
-            &ProbeObservation::new(10)
+            &ProbeObservation::new()
         ));
         assert!(is_success(
             &monitor(MonitorKind::Tcp, MonitorConfig::default()),
-            &ProbeObservation::new(10)
+            &ProbeObservation::new()
         ));
     }
 }

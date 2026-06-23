@@ -256,31 +256,38 @@ fn fill_unknown_points(
     let tolerance = Duration::milliseconds(((interval_seconds as i64) * 1000 / 2).max(1));
     let mut expected_at = from;
     let mut expected_count = 0usize;
+    let mut unknown_results = Vec::new();
+    results.sort_by_key(|result| result.checked_at);
+    let mut cursor = 0usize;
 
     while expected_at <= to {
         expected_count += 1;
-        if expected_count > 1000 {
+        if expected_count > 50_000 {
             return Err(AppError::BadRequest(
-                "time range produces more than 1000 expected points".to_string(),
+                "time range produces more than 50000 expected points".to_string(),
             ));
         }
 
         // 允许半个 interval 的抖动，避免调度 tick 和网络耗时造成重复补点。
-        let has_real_result = results.iter().any(|result| {
-            let distance = result
-                .checked_at
-                .signed_duration_since(expected_at)
-                .num_milliseconds()
-                .abs();
-            distance <= tolerance.num_milliseconds()
-        });
+        let window_start = expected_at - tolerance;
+        let window_end = expected_at + tolerance;
+        while results
+            .get(cursor)
+            .is_some_and(|result| result.checked_at < window_start)
+        {
+            cursor += 1;
+        }
+        let has_real_result = results
+            .get(cursor)
+            .is_some_and(|result| result.checked_at <= window_end);
         if !has_real_result {
-            results.push(CheckResult::unknown(monitor_id, expected_at));
+            unknown_results.push(CheckResult::unknown(monitor_id, expected_at));
         }
 
         expected_at += interval;
     }
 
+    results.extend(unknown_results);
     results.sort_by_key(|result| result.checked_at);
     Ok(results)
 }
@@ -497,7 +504,7 @@ mod tests {
     #[test]
     fn fill_unknown_points_rejects_too_many_expected_points() {
         let from = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
-        let to = from + Duration::seconds(1001);
+        let to = from + Duration::seconds(50_001);
 
         let error = fill_unknown_points(1, 1, from, to, Vec::new()).unwrap_err();
 

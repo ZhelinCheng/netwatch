@@ -61,15 +61,18 @@ pub struct MonitorConfig {
     /// HTTP 探测可选关键字；设置后响应体必须包含该字符串。
     #[serde(default)]
     pub keyword: Option<String>,
-    /// DNS 记录类型提示；当前实现主要用于元数据展示。
+    /// HTTP 响应头匹配规则；value 按正则表达式匹配。
     #[serde(default)]
-    pub dns_record: Option<String>,
+    pub expected_headers: Option<Vec<HttpHeaderMatch>>,
+    /// 多条响应头规则的匹配方式，默认要求全部满足。
+    #[serde(default)]
+    pub header_match_mode: Option<HeaderMatchMode>,
+    /// DNS 记录类型。
+    #[serde(default)]
+    pub dns_record: Option<DnsRecordType>,
     /// DNS 期望解析结果；设置后至少一个解析值需要精确匹配。
     #[serde(default)]
     pub expected_value: Option<String>,
-    /// 用户自定义成功判断规则；为空时使用协议默认判断。
-    #[serde(default)]
-    pub success_rules: Option<Vec<SuccessRule>>,
 }
 
 impl Default for MonitorConfig {
@@ -79,110 +82,56 @@ impl Default for MonitorConfig {
             expected_status_min: None,
             expected_status_max: None,
             keyword: None,
-            dns_record: Some("A".to_string()),
+            expected_headers: None,
+            header_match_mode: Some(HeaderMatchMode::All),
+            dns_record: Some(DnsRecordType::A),
             expected_value: None,
-            success_rules: None,
         }
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum CompareOp {
-    /// 等于。
-    Eq,
-    /// 不等于。
-    Ne,
-    /// 大于。
-    Gt,
-    /// 大于等于。
-    Gte,
-    /// 小于。
-    Lt,
-    /// 小于等于。
-    Lte,
-}
-
-impl CompareOp {
-    /// 对数值型观测值执行比较。
-    pub fn matches_u64(&self, left: u64, right: u64) -> bool {
-        match self {
-            Self::Eq => left == right,
-            Self::Ne => left != right,
-            Self::Gt => left > right,
-            Self::Gte => left >= right,
-            Self::Lt => left < right,
-            Self::Lte => left <= right,
-        }
-    }
+pub struct HttpHeaderMatch {
+    pub key: String,
+    pub value: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum TextOp {
-    /// 包含目标文本。
-    Contains,
-    /// 与目标文本完全一致。
-    Equals,
-    /// 不包含目标文本。
-    NotContains,
-    /// 与目标文本不一致。
-    NotEquals,
+pub enum HeaderMatchMode {
+    /// 全部响应头规则都必须满足。
+    All,
+    /// 任一响应头规则满足即可。
+    Any,
 }
 
-impl TextOp {
-    /// 对单个文本值执行匹配。
-    pub fn matches(&self, left: &str, right: &str) -> bool {
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[allow(clippy::upper_case_acronyms)]
+pub enum DnsRecordType {
+    A,
+    AAAA,
+    CNAME,
+    MX,
+    TXT,
+    NS,
+    SOA,
+    CAA,
+    SRV,
+}
+
+impl DnsRecordType {
+    pub fn as_str(&self) -> &'static str {
         match self {
-            Self::Contains => left.contains(right),
-            Self::Equals => left == right,
-            Self::NotContains => !left.contains(right),
-            Self::NotEquals => left != right,
+            Self::A => "A",
+            Self::AAAA => "AAAA",
+            Self::CNAME => "CNAME",
+            Self::MX => "MX",
+            Self::TXT => "TXT",
+            Self::NS => "NS",
+            Self::SOA => "SOA",
+            Self::CAA => "CAA",
+            Self::SRV => "SRV",
         }
-    }
-
-    /// 对一组候选文本执行匹配；否定操作要求所有候选都不命中。
-    pub fn matches_any<'a>(
-        &self,
-        values: impl IntoIterator<Item = &'a str>,
-        expected: &str,
-    ) -> bool {
-        match self {
-            Self::NotContains | Self::NotEquals => values
-                .into_iter()
-                .all(|value| self.matches(value, expected)),
-            Self::Contains | Self::Equals => values
-                .into_iter()
-                .any(|value| self.matches(value, expected)),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum SuccessRule {
-    /// HTTP 状态码规则。
-    HttpStatus { op: CompareOp, value: u16 },
-    /// HTTP 响应体文本规则。
-    HttpBody { op: TextOp, value: String },
-    /// HTTP 响应头规则，key 会按小写匹配。
-    HttpHeader {
-        key: String,
-        op: TextOp,
-        value: String,
-    },
-    /// DNS 解析结果规则。
-    DnsAnswer { op: TextOp, value: String },
-    /// 通用延迟规则，可叠加在任意协议上。
-    Latency { op: CompareOp, value_us: u64 },
-}
-
-impl MonitorConfig {
-    /// 是否启用了用户自定义成功规则。
-    pub fn has_success_rules(&self) -> bool {
-        self.success_rules
-            .as_ref()
-            .is_some_and(|rules| !rules.is_empty())
     }
 }
 
@@ -243,6 +192,8 @@ impl CreateMonitor {
         validate_monitor_input(
             &self.name,
             &self.target,
+            self.kind.clone(),
+            &self.config,
             self.interval_seconds,
             self.timeout_seconds,
         )?;
@@ -267,6 +218,8 @@ impl CreateMonitor {
 pub fn validate_monitor_input(
     name: &str,
     target: &str,
+    kind: MonitorKind,
+    config: &MonitorConfig,
     interval_seconds: u64,
     timeout_seconds: u64,
 ) -> Result<(), AppError> {
@@ -288,6 +241,36 @@ pub fn validate_monitor_input(
             "timeout_seconds must be greater than 0 and not exceed interval_seconds".to_string(),
         ));
     }
+    validate_monitor_config(kind, config)?;
+    Ok(())
+}
+
+fn validate_monitor_config(kind: MonitorKind, config: &MonitorConfig) -> Result<(), AppError> {
+    if kind != MonitorKind::Http {
+        return Ok(());
+    }
+
+    if let Some(keyword) = config.keyword.as_deref().filter(|value| !value.is_empty()) {
+        regex::Regex::new(keyword)
+            .map_err(|error| AppError::BadRequest(format!("keyword regex is invalid: {error}")))?;
+    }
+
+    for header in config.expected_headers.as_deref().unwrap_or_default() {
+        if header.key.trim().is_empty() {
+            return Err(AppError::BadRequest(
+                "header match key must not be empty".to_string(),
+            ));
+        }
+        if header.value.trim().is_empty() {
+            return Err(AppError::BadRequest(
+                "header match value must not be empty".to_string(),
+            ));
+        }
+        regex::Regex::new(header.value.trim()).map_err(|error| {
+            AppError::BadRequest(format!("header match regex is invalid: {error}"))
+        })?;
+    }
+
     Ok(())
 }
 
@@ -323,37 +306,11 @@ mod tests {
     }
 
     #[test]
-    fn operators_match_numbers_and_text() {
-        assert!(CompareOp::Eq.matches_u64(10, 10));
-        assert!(CompareOp::Ne.matches_u64(10, 11));
-        assert!(CompareOp::Gt.matches_u64(11, 10));
-        assert!(CompareOp::Gte.matches_u64(10, 10));
-        assert!(CompareOp::Lt.matches_u64(9, 10));
-        assert!(CompareOp::Lte.matches_u64(10, 10));
-
-        assert!(TextOp::Contains.matches("hello world", "world"));
-        assert!(TextOp::Equals.matches("ready", "ready"));
-        assert!(TextOp::NotContains.matches("hello", "world"));
-        assert!(TextOp::NotEquals.matches("ready", "down"));
-        assert!(TextOp::Contains.matches_any(["a", "bc"], "b"));
-        assert!(TextOp::NotEquals.matches_any(["a", "bc"], "z"));
-        assert!(!TextOp::NotContains.matches_any(["a", "bc"], "b"));
-    }
-
-    #[test]
-    fn monitor_config_defaults_and_rule_detection_are_stable() {
+    fn monitor_config_defaults_are_stable() {
         let config = MonitorConfig::default();
-        assert_eq!(config.dns_record.as_deref(), Some("A"));
-        assert!(!config.has_success_rules());
-
-        let config = MonitorConfig {
-            success_rules: Some(vec![SuccessRule::Latency {
-                op: CompareOp::Lt,
-                value_us: 500,
-            }]),
-            ..MonitorConfig::default()
-        };
-        assert!(config.has_success_rules());
+        assert_eq!(config.dns_record, Some(DnsRecordType::A));
+        assert_eq!(config.header_match_mode, Some(HeaderMatchMode::All));
+        assert_eq!(DnsRecordType::TXT.as_str(), "TXT");
     }
 
     #[test]
@@ -374,12 +331,57 @@ mod tests {
         assert_eq!(monitor.kind, MonitorKind::Http);
         assert!(monitor.enabled);
 
-        assert!(validate_monitor_input("", "x", 5, 1).is_err());
-        assert!(validate_monitor_input("x", " ", 5, 1).is_err());
-        assert!(validate_monitor_input("x", "y", 1, 1).is_err());
-        assert!(validate_monitor_input("x", "y", 2, 1).is_ok());
-        assert!(validate_monitor_input("x", "y", 5, 0).is_err());
-        assert!(validate_monitor_input("x", "y", 5, 6).is_err());
+        assert!(
+            validate_monitor_input("", "x", MonitorKind::Http, &MonitorConfig::default(), 5, 1)
+                .is_err()
+        );
+        assert!(
+            validate_monitor_input("x", " ", MonitorKind::Http, &MonitorConfig::default(), 5, 1)
+                .is_err()
+        );
+        assert!(
+            validate_monitor_input("x", "y", MonitorKind::Http, &MonitorConfig::default(), 1, 1)
+                .is_err()
+        );
+        assert!(
+            validate_monitor_input("x", "y", MonitorKind::Http, &MonitorConfig::default(), 2, 1)
+                .is_ok()
+        );
+        assert!(
+            validate_monitor_input("x", "y", MonitorKind::Http, &MonitorConfig::default(), 5, 0)
+                .is_err()
+        );
+        assert!(
+            validate_monitor_input("x", "y", MonitorKind::Http, &MonitorConfig::default(), 5, 6)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn monitor_config_validates_http_regex_and_headers() {
+        let config = MonitorConfig {
+            keyword: Some("[".into()),
+            ..MonitorConfig::default()
+        };
+        assert!(validate_monitor_config(MonitorKind::Http, &config).is_err());
+
+        let config = MonitorConfig {
+            expected_headers: Some(vec![HttpHeaderMatch {
+                key: "x-state".into(),
+                value: "rea.*".into(),
+            }]),
+            ..MonitorConfig::default()
+        };
+        assert!(validate_monitor_config(MonitorKind::Http, &config).is_ok());
+
+        let config = MonitorConfig {
+            expected_headers: Some(vec![HttpHeaderMatch {
+                key: "".into(),
+                value: "ready".into(),
+            }]),
+            ..MonitorConfig::default()
+        };
+        assert!(validate_monitor_config(MonitorKind::Http, &config).is_err());
     }
 
     #[test]
@@ -394,6 +396,17 @@ mod tests {
         assert_eq!(input.interval_seconds, 60);
         assert_eq!(input.timeout_seconds, 10);
         assert!(input.enabled);
-        assert_eq!(input.config.dns_record.as_deref(), Some("A"));
+        assert_eq!(input.config.dns_record, Some(DnsRecordType::A));
+    }
+
+    #[test]
+    fn monitor_config_ignores_removed_success_rules_from_old_json() {
+        let config: MonitorConfig = serde_json::from_value(json!({
+            "success_rules": [{ "type": "latency", "op": "lt", "value_us": 500 }],
+            "dns_record": "TXT"
+        }))
+        .unwrap();
+
+        assert_eq!(config.dns_record, Some(DnsRecordType::TXT));
     }
 }

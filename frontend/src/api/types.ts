@@ -1,24 +1,23 @@
 export type MonitorKind = 'http' | 'dns' | 'tcp' | 'ping'
 export type CheckStatus = 'success' | 'failed' | 'unknown'
 export type AlertKind = 'triggered' | 'recovered' | 'certificate_expiring'
-export type CompareOp = 'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte'
-export type TextOp = 'contains' | 'equals' | 'not_contains' | 'not_equals'
+export type HeaderMatchMode = 'all' | 'any'
+export type DnsRecordType = 'A' | 'AAAA' | 'CNAME' | 'MX' | 'TXT' | 'NS' | 'SOA' | 'CAA' | 'SRV'
 
-export type SuccessRule =
-  | { type: 'http_status'; op: CompareOp; value: number }
-  | { type: 'http_body'; op: TextOp; value: string }
-  | { type: 'http_header'; key: string; op: TextOp; value: string }
-  | { type: 'dns_answer'; op: TextOp; value: string }
-  | { type: 'latency'; op: CompareOp; value_us: number }
+export interface HttpHeaderMatch {
+  key: string
+  value: string
+}
 
 export interface MonitorConfig {
   expected_status?: number | null
   expected_status_min?: number | null
   expected_status_max?: number | null
   keyword?: string | null
-  dns_record?: string | null
+  expected_headers?: HttpHeaderMatch[] | null
+  header_match_mode?: HeaderMatchMode | null
+  dns_record?: DnsRecordType | null
   expected_value?: string | null
-  success_rules?: SuccessRule[] | null
 }
 
 export interface Monitor {

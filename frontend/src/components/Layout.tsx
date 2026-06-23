@@ -105,14 +105,6 @@ export function Layout({ children }: LayoutProps) {
               搜索
             </button>
           </div>
-          <div className={styles.dateRange}>
-            <CalendarDays size={15} />
-            <span>最近 1 小时</span>
-          </div>
-          <div className={styles.refresh}>
-            <RefreshCcw size={16} />
-            <span>自动刷新 · 30s</span>
-          </div>
         </header>
         <section className={styles.content}>{children ?? <Outlet />}</section>
       </main>

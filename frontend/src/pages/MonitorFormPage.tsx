@@ -1,24 +1,21 @@
-import { Plus, Save, Trash2 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { Save } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Switch } from '../components/Switch'
 import { netwatchApi } from '../api/netwatch'
-import type { MonitorKind, MonitorPayload, SuccessRule } from '../api/types'
+import type { DnsRecordType, HeaderMatchMode, HttpHeaderMatch, MonitorKind, MonitorPayload } from '../api/types'
 import styles from './pages.module.scss'
 
-interface RuleDraft {
-  metric: 'status' | 'latency' | 'body'
-  op: 'gte' | 'lte' | 'contains'
-  value: string
-}
-
-const defaultRules: RuleDraft[] = [
-  { metric: 'status', op: 'gte', value: '200' },
-  { metric: 'status', op: 'lte', value: '399' },
-  { metric: 'latency', op: 'lte', value: '2000' },
-]
+const dnsRecordTypes: DnsRecordType[] = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SOA', 'CAA', 'SRV']
+const defaultName = '我的网站监控'
+const defaultKind: MonitorKind = 'http'
+const defaultTarget = 'https://www.example.com'
+const defaultInterval = 60
+const defaultTimeout = 10
+const defaultStatusMin = 200
+const defaultStatusMax = 399
 
 export function MonitorFormPage() {
   const { id } = useParams()
@@ -33,33 +30,75 @@ export function MonitorFormPage() {
     queryFn: () => netwatchApi.monitor(numericId!),
   })
 
-  const [name, setName] = useState('我的网站监控')
-  const [kind, setKind] = useState<MonitorKind>('http')
-  const [target, setTarget] = useState('https://www.example.com')
+  const [name, setName] = useState(defaultName)
+  const [kind, setKind] = useState<MonitorKind>(defaultKind)
+  const [target, setTarget] = useState(defaultTarget)
   const [enabled, setEnabled] = useState(true)
-  const [interval, setInterval] = useState(60)
-  const [timeout, setTimeoutValue] = useState(10)
-  const [statusMin, setStatusMin] = useState(200)
-  const [statusMax, setStatusMax] = useState(399)
+  const [interval, setInterval] = useState(defaultInterval)
+  const [timeout, setTimeoutValue] = useState(defaultTimeout)
+  const [statusMin, setStatusMin] = useState(defaultStatusMin)
+  const [statusMax, setStatusMax] = useState(defaultStatusMax)
   const [keyword, setKeyword] = useState('')
-  const [dnsRecord, setDnsRecord] = useState('A')
+  const [headerMatchMode, setHeaderMatchMode] = useState<HeaderMatchMode>('all')
+  const [headerLines, setHeaderLines] = useState('')
+  const [dnsRecord, setDnsRecord] = useState<DnsRecordType>('A')
   const [expectedValue, setExpectedValue] = useState('')
-  const [rules, setRules] = useState<RuleDraft[]>(defaultRules)
   const [error, setError] = useState('')
-  const [dirty, setDirty] = useState(false)
+  const [loadedFormKey, setLoadedFormKey] = useState<string | null>(null)
 
-  const formName = !dirty && monitorQuery.data ? monitorQuery.data.name : name
-  const formKind = !dirty && monitorQuery.data ? monitorQuery.data.kind : kind
-  const formTarget = !dirty && monitorQuery.data ? monitorQuery.data.target : target
-  const formEnabled = !dirty && monitorQuery.data ? monitorQuery.data.enabled : enabled
-  const formInterval = !dirty && monitorQuery.data ? monitorQuery.data.interval_seconds : interval
-  const formTimeout = !dirty && monitorQuery.data ? monitorQuery.data.timeout_seconds : timeout
-  const formStatusMin = !dirty && monitorQuery.data ? (monitorQuery.data.config.expected_status_min ?? 200) : statusMin
-  const formStatusMax = !dirty && monitorQuery.data ? (monitorQuery.data.config.expected_status_max ?? 399) : statusMax
-  const formKeyword = !dirty && monitorQuery.data ? (monitorQuery.data.config.keyword ?? '') : keyword
-  const formDnsRecord = !dirty && monitorQuery.data ? (monitorQuery.data.config.dns_record ?? 'A') : dnsRecord
-  const formExpectedValue =
-    !dirty && monitorQuery.data ? (monitorQuery.data.config.expected_value ?? '') : expectedValue
+  useEffect(() => {
+    if (monitorQuery.data) {
+      const formKey = `monitor:${monitorQuery.data.id}`
+      if (loadedFormKey === formKey) return
+      setName(monitorQuery.data.name)
+      setKind(monitorQuery.data.kind)
+      setTarget(monitorQuery.data.target)
+      setEnabled(monitorQuery.data.enabled)
+      setInterval(monitorQuery.data.interval_seconds)
+      setTimeoutValue(monitorQuery.data.timeout_seconds)
+      setStatusMin(monitorQuery.data.config.expected_status_min ?? defaultStatusMin)
+      setStatusMax(monitorQuery.data.config.expected_status_max ?? defaultStatusMax)
+      setKeyword(monitorQuery.data.config.keyword ?? '')
+      setHeaderMatchMode(monitorQuery.data.config.header_match_mode ?? 'all')
+      setHeaderLines(headersToLines(monitorQuery.data.config.expected_headers))
+      setDnsRecord(normalizeDnsRecord(monitorQuery.data.config.dns_record))
+      setExpectedValue(monitorQuery.data.config.expected_value ?? '')
+      setLoadedFormKey(formKey)
+      return
+    }
+
+    if (!isEdit && loadedFormKey !== 'new') {
+      setName(defaultName)
+      setKind(defaultKind)
+      setTarget(defaultTarget)
+      setEnabled(true)
+      setInterval(defaultInterval)
+      setTimeoutValue(defaultTimeout)
+      setStatusMin(defaultStatusMin)
+      setStatusMax(defaultStatusMax)
+      setKeyword('')
+      setHeaderMatchMode('all')
+      setHeaderLines('')
+      setDnsRecord('A')
+      setExpectedValue('')
+      setLoadedFormKey('new')
+    }
+  }, [isEdit, loadedFormKey, monitorQuery.data])
+
+  const formName = name
+  const formKind = kind
+  const formTarget = target
+  const formEnabled = enabled
+  const formInterval = interval
+  const formTimeout = timeout
+  const formStatusMin = statusMin
+  const formStatusMax = statusMax
+  const formKeyword = keyword
+  const formHeaderMatchMode = headerMatchMode
+  const formHeaderLines = headerLines
+  const formDnsRecord = dnsRecord
+  const formExpectedValue = expectedValue
+  const parsedHeaders = useMemo(() => parseHeaderLines(formHeaderLines), [formHeaderLines])
 
   const mutation = useMutation({
     mutationFn: (payload: MonitorPayload) =>
@@ -83,9 +122,10 @@ export function MonitorFormPage() {
         expected_status_min: formKind === 'http' ? formStatusMin : null,
         expected_status_max: formKind === 'http' ? formStatusMax : null,
         keyword: formKind === 'http' && formKeyword.trim() ? formKeyword.trim() : null,
+        expected_headers: formKind === 'http' ? parsedHeaders.headers : null,
+        header_match_mode: formKind === 'http' ? formHeaderMatchMode : null,
         dns_record: formKind === 'dns' ? formDnsRecord : null,
         expected_value: formKind === 'dns' && formExpectedValue.trim() ? formExpectedValue.trim() : null,
-        success_rules: rulesToPayload(rules, formKind),
       },
     }),
     [
@@ -93,14 +133,16 @@ export function MonitorFormPage() {
       formEnabled,
       formExpectedValue,
       formInterval,
+      formHeaderMatchMode,
       formKeyword,
       formKind,
+      formHeaderLines,
       formName,
       formStatusMax,
       formStatusMin,
       formTarget,
       formTimeout,
-      rules,
+      parsedHeaders.headers,
     ],
   )
 
@@ -122,6 +164,10 @@ export function MonitorFormPage() {
       setError('超时时间必须大于 0，且不能大于检查间隔')
       return
     }
+    if (formKind === 'http' && parsedHeaders.error) {
+      setError(parsedHeaders.error)
+      return
+    }
     setError('')
     mutation.mutate(payload)
   }
@@ -131,7 +177,7 @@ export function MonitorFormPage() {
       <div className={styles.pageHeader}>
         <div>
           <h1>{isEdit ? '编辑监控项' : '新建监控项'}</h1>
-          <p>配置目标、检查间隔和成功规则。</p>
+          <p>配置目标、检查间隔和协议探测条件。</p>
         </div>
         <div className={styles.filterGroup}>
           <Link className={styles.ghostButton} to={isEdit ? `/monitors/${numericId}` : '/monitors'}>
@@ -214,9 +260,29 @@ export function MonitorFormPage() {
                 </label>
               </div>
               <label className={styles.field}>
-                <span>响应关键词（可选）</span>
-                <input className={styles.input} value={formKeyword} placeholder="例如：success, ok, healthy" onChange={(event) => update(setKeyword, event.target.value)} />
+                <span>响应关键词/正则（可选）</span>
+                <input className={styles.input} value={formKeyword} placeholder="例如：healthy|ok" onChange={(event) => update(setKeyword, event.target.value)} />
+                <small>按正则匹配响应体；普通文本会作为包含匹配使用。</small>
               </label>
+              <div className={styles.formGrid}>
+                <label className={styles.field}>
+                  <span>响应头匹配模式</span>
+                  <select className={styles.select} value={formHeaderMatchMode} onChange={(event) => update(setHeaderMatchMode, event.target.value as HeaderMatchMode)}>
+                    <option value="all">全部满足</option>
+                    <option value="any">任一满足</option>
+                  </select>
+                </label>
+                <label className={styles.field}>
+                  <span>响应头匹配（可选）</span>
+                  <textarea
+                    className={styles.textarea}
+                    value={formHeaderLines}
+                    placeholder={'content-type: application/json\nx-env: prod|staging'}
+                    onChange={(event) => update(setHeaderLines, event.target.value)}
+                  />
+                  <small>每行一个 key: 正则表达式。</small>
+                </label>
+              </div>
             </>
           ) : null}
 
@@ -224,7 +290,13 @@ export function MonitorFormPage() {
             <div className={styles.formGrid}>
               <label className={styles.field}>
                 <span>DNS 记录类型</span>
-                <input className={styles.input} value={formDnsRecord} onChange={(event) => update(setDnsRecord, event.target.value)} />
+                <select className={styles.select} value={formDnsRecord} onChange={(event) => update(setDnsRecord, event.target.value as DnsRecordType)}>
+                  {dnsRecordTypes.map((recordType) => (
+                    <option key={recordType} value={recordType}>
+                      {recordType}
+                    </option>
+                  ))}
+                </select>
               </label>
               <label className={styles.field}>
                 <span>期望解析值（可选）</span>
@@ -245,61 +317,37 @@ export function MonitorFormPage() {
         </div>
       </section>
 
-      <section className={styles.section}>
-        <div className={styles.cardHeader}>
-          <h2>高级成功规则（可选）</h2>
-          <button className={styles.ghostButton} type="button" onClick={() => setRules([...rules, { metric: 'body', op: 'contains', value: '' }])}>
-            <Plus size={16} /> 添加规则
-          </button>
-        </div>
-        <div className={styles.sectionBody}>
-          <div className={styles.rules}>
-            {rules.map((rule, index) => (
-              <div className={styles.ruleRow} key={`${rule.metric}-${index}`}>
-                <select className={styles.select} value={rule.metric} onChange={(event) => updateRule(index, { metric: event.target.value as RuleDraft['metric'] })}>
-                  <option value="status">状态码</option>
-                  <option value="latency">响应时间（ms）</option>
-                  <option value="body">响应体包含</option>
-                </select>
-                <select className={styles.select} value={rule.op} onChange={(event) => updateRule(index, { op: event.target.value as RuleDraft['op'] })}>
-                  <option value="gte">大于等于</option>
-                  <option value="lte">小于等于</option>
-                  <option value="contains">包含</option>
-                </select>
-                <input className={styles.input} value={rule.value} onChange={(event) => updateRule(index, { value: event.target.value })} />
-                <button className={styles.iconButton} type="button" onClick={() => setRules(rules.filter((_, itemIndex) => itemIndex !== index))}>
-                  <Trash2 size={15} />
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
     </form>
   )
 
-  function updateRule(index: number, patch: Partial<RuleDraft>) {
-    setDirty(true)
-    setRules(rules.map((rule, itemIndex) => (itemIndex === index ? { ...rule, ...patch } : rule)))
-  }
-
   function update<T>(setter: (value: T) => void, value: T) {
-    setDirty(true)
     setter(value)
   }
 }
 
-function rulesToPayload(rules: RuleDraft[], kind: MonitorKind): SuccessRule[] | null {
-  if (kind !== 'http') return null
-  const payload = rules.flatMap<SuccessRule>((rule) => {
-    if (!rule.value.trim()) return []
-    if (rule.metric === 'status') {
-      return [{ type: 'http_status', op: rule.op === 'gte' ? 'gte' : 'lte', value: Number(rule.value) }]
+function normalizeDnsRecord(value?: DnsRecordType | string | null): DnsRecordType {
+  return dnsRecordTypes.includes(value as DnsRecordType) ? (value as DnsRecordType) : 'A'
+}
+
+function headersToLines(headers?: HttpHeaderMatch[] | null) {
+  return headers?.map((header) => `${header.key}: ${header.value}`).join('\n') ?? ''
+}
+
+function parseHeaderLines(lines: string): { headers: HttpHeaderMatch[] | null; error: string } {
+  const headers: HttpHeaderMatch[] = []
+  for (const line of lines.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    const separatorIndex = trimmed.indexOf(':')
+    if (separatorIndex <= 0) {
+      return { headers: null, error: '响应头匹配每行必须使用 key: 正则表达式 格式' }
     }
-    if (rule.metric === 'latency') {
-      return [{ type: 'latency', op: 'lte', value_us: Number(rule.value) * 1000 }]
+    const key = trimmed.slice(0, separatorIndex).trim()
+    const value = trimmed.slice(separatorIndex + 1).trim()
+    if (!key || !value) {
+      return { headers: null, error: '响应头匹配的 key 和正则表达式不能为空' }
     }
-    return [{ type: 'http_body', op: 'contains', value: rule.value.trim() }]
-  })
-  return payload.length ? payload : null
+    headers.push({ key, value })
+  }
+  return { headers: headers.length ? headers : null, error: '' }
 }

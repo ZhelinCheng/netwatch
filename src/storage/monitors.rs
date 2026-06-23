@@ -118,6 +118,8 @@ pub async fn update(pool: &SqlitePool, id: i64, input: UpdateMonitor) -> Result<
     validate_monitor_input(
         &monitor.name,
         &monitor.target,
+        monitor.kind.clone(),
+        &monitor.config,
         monitor.interval_seconds,
         monitor.timeout_seconds,
     )?;
@@ -251,8 +253,14 @@ mod tests {
         assert!(resumed.enabled);
 
         delete(&pool, inserted.id).await.unwrap();
-        assert!(matches!(get(&pool, inserted.id).await, Err(AppError::NotFound)));
-        assert!(matches!(delete(&pool, inserted.id).await, Err(AppError::NotFound)));
+        assert!(matches!(
+            get(&pool, inserted.id).await,
+            Err(AppError::NotFound)
+        ));
+        assert!(matches!(
+            delete(&pool, inserted.id).await,
+            Err(AppError::NotFound)
+        ));
     }
 
     #[tokio::test]

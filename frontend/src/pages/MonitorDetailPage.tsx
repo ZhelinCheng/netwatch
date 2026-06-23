@@ -1,4 +1,5 @@
 import { Edit3, Globe2, Pause, Play, Trash2 } from 'lucide-react'
+import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Badge } from '../components/Badge'
@@ -8,11 +9,22 @@ import { compactTime, dateTime, intervalLabel, kindLabel, latencyMs, statusLabel
 import { netwatchApi } from '../api/netwatch'
 import styles from './pages.module.scss'
 
+const chartRanges = [
+  { key: '24h', label: '24 小时', seconds: 24 * 60 * 60 },
+  { key: '7d', label: '7 日', seconds: 7 * 24 * 60 * 60 },
+  { key: '30d', label: '30 日', seconds: 30 * 24 * 60 * 60 },
+  { key: '365d', label: '365 日', seconds: 365 * 24 * 60 * 60 },
+] as const
+
+type ChartRangeKey = (typeof chartRanges)[number]['key']
+
 export function MonitorDetailPage() {
   const { id } = useParams()
   const monitorId = Number(id)
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const [chartRange, setChartRange] = useState<ChartRangeKey>('24h')
+  const selectedChartRange = chartRanges.find((range) => range.key === chartRange) ?? chartRanges[0]
 
   const monitor = useQuery({
     queryKey: ['monitor', monitorId],
@@ -21,11 +33,11 @@ export function MonitorDetailPage() {
   })
 
   const checks = useQuery({
-    queryKey: ['checks', monitorId, 'detail'],
+    queryKey: ['checks', monitorId, 'detail', chartRange],
     enabled: Number.isFinite(monitorId),
     queryFn: () => {
       const to = Math.floor(Date.now() / 1000)
-      return netwatchApi.checks(monitorId, { from: to - 60 * 60, to })
+      return netwatchApi.checks(monitorId, { from: to - selectedChartRange.seconds, to })
     },
     refetchInterval: 30_000,
   })
@@ -119,7 +131,7 @@ export function MonitorDetailPage() {
           <strong>{latencyMs(latest?.kind === 'raw' ? latest.latency_us : null)}</strong>
         </div>
         <div className={styles.statCard}>
-          <span>24h 可用率</span>
+          <span>{selectedChartRange.label} 可用率</span>
           <strong>{checks.data?.metrics.availability.toFixed(2) ?? '0.00'}%</strong>
         </div>
         <div className={styles.statCard}>
@@ -138,13 +150,26 @@ export function MonitorDetailPage() {
         <div className={styles.card}>
           <div className={styles.cardHeader}>
             <h2>延迟与可用性</h2>
-            <span>最近 1 小时</span>
+            <div className={styles.rangeTabs} aria-label="选择趋势时间范围">
+              {chartRanges.map((range) => (
+                <button
+                  key={range.key}
+                  type="button"
+                  className={range.key === chartRange ? styles.rangeTabActive : ''}
+                  onClick={() => setChartRange(range.key)}
+                >
+                  {range.label}
+                </button>
+              ))}
+            </div>
           </div>
-          {checks.data?.results.length ? (
-            <StatusChart points={checks.data.results} height={330} />
-          ) : (
-            <EmptyState title="暂无检查序列" />
-          )}
+          <div className={styles.chartBody}>
+            {checks.data?.results.length ? (
+              <StatusChart points={checks.data.results} height={330} />
+            ) : (
+              <EmptyState title="暂无检查序列" />
+            )}
+          </div>
         </div>
 
         <div className={styles.card}>
@@ -160,17 +185,37 @@ export function MonitorDetailPage() {
               <dt>目标</dt>
               <dd>{monitor.data.target}</dd>
             </div>
-            <div>
-              <dt>期望状态码</dt>
-              <dd>
-                {monitor.data.config.expected_status_min ?? 200} -{' '}
-                {monitor.data.config.expected_status_max ?? 399}
-              </dd>
-            </div>
-            <div>
-              <dt>关键词</dt>
-              <dd>{monitor.data.config.keyword || '-'}</dd>
-            </div>
+            {monitor.data.kind === 'http' ? (
+              <>
+                <div>
+                  <dt>期望状态码</dt>
+                  <dd>
+                    {monitor.data.config.expected_status_min ?? 200} -{' '}
+                    {monitor.data.config.expected_status_max ?? 399}
+                  </dd>
+                </div>
+                <div>
+                  <dt>响应关键词/正则</dt>
+                  <dd>{monitor.data.config.keyword || '-'}</dd>
+                </div>
+                <div>
+                  <dt>响应头匹配</dt>
+                  <dd>{monitor.data.config.expected_headers?.length ?? 0} 条</dd>
+                </div>
+              </>
+            ) : null}
+            {monitor.data.kind === 'dns' ? (
+              <>
+                <div>
+                  <dt>DNS 记录类型</dt>
+                  <dd>{monitor.data.config.dns_record ?? 'A'}</dd>
+                </div>
+                <div>
+                  <dt>期望解析值</dt>
+                  <dd>{monitor.data.config.expected_value || '-'}</dd>
+                </div>
+              </>
+            ) : null}
             <div>
               <dt>启用状态</dt>
               <dd>{monitor.data.enabled ? '启用' : '暂停'}</dd>

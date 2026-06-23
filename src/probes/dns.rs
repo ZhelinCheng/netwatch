@@ -1,14 +1,21 @@
 //! DNS 探测器。
 //!
-//! 当前实现使用 Tokio 的系统解析器，先满足个人自部署的实用需求；
-//! 后续可替换为 hickory-resolver 以支持更精细的记录类型和 DNS 服务器配置。
-
 use std::time::{Duration, Instant};
 
-use tokio::{net::lookup_host, time};
+use hickory_resolver::{
+    TokioResolver,
+    config::{GOOGLE, ResolverConfig},
+    net::NetError,
+    net::runtime::TokioRuntimeProvider,
+    proto::rr::{RData, RecordType},
+};
+use tokio::time;
 
 use crate::{
-    domain::{check::CheckResult, monitor::Monitor},
+    domain::{
+        check::CheckResult,
+        monitor::{DnsRecordType, Monitor},
+    },
     error::AppError,
     probes::observation::{ProbeObservation, is_success},
 };
@@ -16,31 +23,34 @@ use crate::{
 /// 解析目标域名并记录耗时，可选校验期望 IP/值。
 pub async fn probe(monitor: &Monitor, timeout: Duration) -> Result<CheckResult, AppError> {
     let started = Instant::now();
-    let target = if monitor.target.contains(':') {
-        monitor.target.clone()
-    } else {
-        format!("{}:80", monitor.target)
-    };
+    let target = dns_target(&monitor.target);
+    let record_type = monitor
+        .config
+        .dns_record
+        .clone()
+        .unwrap_or(DnsRecordType::A);
     tracing::debug!(
         monitor_id = monitor.id,
         target = %target,
+        record_type = record_type.as_str(),
         timeout_ms = timeout.as_millis(),
         "starting dns probe"
     );
 
-    let addrs = time::timeout(timeout, lookup_host(&target))
+    let resolver = resolver().map_err(anyhow::Error::from)?;
+    let values = time::timeout(timeout, lookup_records(&resolver, &target, &record_type))
         .await
         .map_err(|_| AppError::BadRequest("dns lookup timed out".to_string()))?
         .map_err(anyhow::Error::from)?;
-    let values: Vec<String> = addrs.map(|addr| addr.ip().to_string()).collect();
     let latency_us = started.elapsed().as_micros() as u64;
-    let mut observation = ProbeObservation::new(latency_us);
+    let mut observation = ProbeObservation::new();
     observation.dns_answers = values;
     let answer_count = observation.dns_answers.len();
 
     let success = is_success(monitor, &observation);
     tracing::debug!(
         monitor_id = monitor.id,
+        record_type = record_type.as_str(),
         answer_count = answer_count,
         latency_us = latency_us,
         success = success,
@@ -54,13 +64,72 @@ pub async fn probe(monitor: &Monitor, timeout: Duration) -> Result<CheckResult, 
     }
 }
 
+fn resolver() -> Result<TokioResolver, NetError> {
+    let builder = TokioResolver::builder_tokio().unwrap_or_else(|error| {
+        tracing::debug!(
+            error = %error,
+            "failed to load system dns config, falling back to default resolver"
+        );
+        TokioResolver::builder_with_config(
+            ResolverConfig::udp_and_tcp(&GOOGLE),
+            TokioRuntimeProvider::default(),
+        )
+    });
+    builder.build()
+}
+
+async fn lookup_records(
+    resolver: &TokioResolver,
+    target: &str,
+    record_type: &DnsRecordType,
+) -> Result<Vec<String>, NetError> {
+    let lookup = resolver.lookup(target, to_record_type(record_type)).await?;
+    Ok(lookup
+        .answers()
+        .iter()
+        .map(|record| record_value(&record.data))
+        .collect())
+}
+
+fn dns_target(target: &str) -> String {
+    target
+        .split_once(':')
+        .map(|(host, _)| host)
+        .unwrap_or(target)
+        .trim()
+        .trim_end_matches('.')
+        .to_string()
+}
+
+fn to_record_type(record_type: &DnsRecordType) -> RecordType {
+    match record_type {
+        DnsRecordType::A => RecordType::A,
+        DnsRecordType::AAAA => RecordType::AAAA,
+        DnsRecordType::CNAME => RecordType::CNAME,
+        DnsRecordType::MX => RecordType::MX,
+        DnsRecordType::TXT => RecordType::TXT,
+        DnsRecordType::NS => RecordType::NS,
+        DnsRecordType::SOA => RecordType::SOA,
+        DnsRecordType::CAA => RecordType::CAA,
+        DnsRecordType::SRV => RecordType::SRV,
+    }
+}
+
+fn record_value(value: &RData) -> String {
+    match value {
+        RData::A(value) => value.0.to_string(),
+        RData::AAAA(value) => value.0.to_string(),
+        _ => value.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use chrono::Utc;
 
     use crate::domain::{
         check::CheckStatus,
-        monitor::{Monitor, MonitorConfig, MonitorKind, SuccessRule, TextOp},
+        monitor::{DnsRecordType, Monitor, MonitorConfig, MonitorKind},
     };
 
     use super::*;
@@ -74,10 +143,8 @@ mod tests {
             kind: MonitorKind::Dns,
             target: "localhost".into(),
             config: MonitorConfig {
-                success_rules: Some(vec![SuccessRule::DnsAnswer {
-                    op: TextOp::Contains,
-                    value: "127.".into(),
-                }]),
+                dns_record: Some(DnsRecordType::A),
+                expected_value: Some("127.0.0.1".into()),
                 ..MonitorConfig::default()
             },
             interval_seconds: 5,
@@ -92,5 +159,11 @@ mod tests {
             .unwrap();
 
         assert_eq!(result.status, CheckStatus::Success);
+    }
+
+    #[test]
+    fn dns_target_strips_port_and_record_type_maps_to_dns_type() {
+        assert_eq!(dns_target("example.com:5353"), "example.com");
+        assert_eq!(to_record_type(&DnsRecordType::TXT), RecordType::TXT);
     }
 }

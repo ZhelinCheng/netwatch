@@ -10,7 +10,7 @@ use crate::{
     probes::observation::{ProbeObservation, is_success},
 };
 
-/// 检查目标 URL 的状态码，并可选检查响应体关键字。
+/// 检查目标 URL 的状态码，并可选检查响应体正则。
 pub async fn probe(monitor: &Monitor, timeout: Duration) -> Result<CheckResult, AppError> {
     let client = Client::builder()
         .timeout(timeout)
@@ -47,7 +47,7 @@ pub async fn probe(monitor: &Monitor, timeout: Duration) -> Result<CheckResult, 
         None
     };
     let latency_us = started.elapsed().as_micros() as u64;
-    let mut observation = ProbeObservation::new(latency_us);
+    let mut observation = ProbeObservation::new();
     observation.http_status = Some(status);
     observation.http_headers = headers;
     observation.http_body = body;
@@ -68,25 +68,16 @@ pub async fn probe(monitor: &Monitor, timeout: Duration) -> Result<CheckResult, 
     }
 }
 
-/// 只有关键字或响应体规则存在时才读取 body，避免无意义地加载大响应。
+/// 只有关键字正则存在时才读取 body，避免无意义地加载大响应。
 fn should_read_body(monitor: &Monitor) -> bool {
     monitor.config.keyword.is_some()
-        || monitor
-            .config
-            .success_rules
-            .as_deref()
-            .unwrap_or_default()
-            .iter()
-            .any(|rule| matches!(rule, crate::domain::monitor::SuccessRule::HttpBody { .. }))
 }
 
 #[cfg(test)]
 mod tests {
     use chrono::Utc;
 
-    use crate::domain::{
-        monitor::{CompareOp, MonitorConfig, MonitorKind, SuccessRule, TextOp},
-    };
+    use crate::domain::monitor::{HttpHeaderMatch, MonitorConfig, MonitorKind};
 
     use super::*;
 
@@ -94,31 +85,13 @@ mod tests {
     fn http_rule_detection_reads_body_only_when_needed() {
         let mut monitor = monitor("http://example.com".into());
         monitor.config = MonitorConfig {
-            success_rules: Some(vec![
-                SuccessRule::HttpStatus {
-                    op: CompareOp::Eq,
-                    value: 200,
-                },
-                SuccessRule::HttpHeader {
-                    key: "x-state".into(),
-                    op: TextOp::Equals,
-                    value: "ready".into(),
-                },
-                SuccessRule::HttpBody {
-                    op: TextOp::Contains,
-                    value: "ok".into(),
-                },
-            ]),
+            expected_headers: Some(vec![HttpHeaderMatch {
+                key: "x-state".into(),
+                value: "ready".into(),
+            }]),
             ..MonitorConfig::default()
         };
 
-        assert!(should_read_body(&monitor));
-
-        monitor.config.success_rules = Some(vec![SuccessRule::HttpHeader {
-            key: "x-state".into(),
-            op: TextOp::Equals,
-            value: "ready".into(),
-        }]);
         assert!(!should_read_body(&monitor));
 
         monitor.config.keyword = Some("ok".into());

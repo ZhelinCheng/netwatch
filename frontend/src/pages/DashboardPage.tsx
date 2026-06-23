@@ -1,5 +1,6 @@
 import { AlertCircle, CheckCircle2, HelpCircle } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { useMemo } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Badge } from '../components/Badge'
 import { EmptyState } from '../components/EmptyState'
@@ -17,13 +18,30 @@ function badgeTone(kind: Monitor['kind']) {
 }
 
 export function DashboardPage() {
+  const [searchParams, setSearchParams] = useSearchParams()
   const dashboard = useQuery({
     queryKey: ['dashboard'],
     queryFn: netwatchApi.dashboard,
     refetchInterval: 30_000,
   })
 
-  const chartMonitor = dashboard.data?.monitors[0]
+  const data = dashboard.data
+  const monitors = data?.monitors ?? []
+  const enabledCount = monitors.filter((monitor) => monitor.enabled).length
+  const latest = data?.latest ?? {}
+  const selectedMonitorId = Number(searchParams.get('monitor'))
+  const chartMonitor = useMemo(() => {
+    const selected = Number.isFinite(selectedMonitorId)
+      ? monitors.find((monitor) => monitor.id === selectedMonitorId)
+      : undefined
+    if (selected) return selected
+
+    return (
+      monitors.find((monitor) => latest[String(monitor.id)]?.status === 'failed') ??
+      monitors.find((monitor) => monitor.enabled) ??
+      monitors[0]
+    )
+  }, [latest, monitors, selectedMonitorId])
   const checks = useQuery({
     queryKey: ['checks', chartMonitor?.id, 'dashboard'],
     enabled: Boolean(chartMonitor),
@@ -34,14 +52,23 @@ export function DashboardPage() {
     refetchInterval: 30_000,
   })
 
-  const data = dashboard.data
-  const monitors = data?.monitors ?? []
-  const enabledCount = monitors.filter((monitor) => monitor.enabled).length
-  const latest = data?.latest ?? {}
-  const p95Values = Object.values(latest).flatMap((result) =>
-    result.latency_us == null ? [] : [result.latency_us],
+  const slowestLatest = monitors.reduce<{ monitor: Monitor; latencyUs: number } | null>(
+    (slowest, monitor) => {
+      const latencyUs = latest[String(monitor.id)]?.latency_us
+      if (latencyUs == null) return slowest
+      if (!slowest || latencyUs > slowest.latencyUs) return { monitor, latencyUs }
+      return slowest
+    },
+    null,
   )
-  const p95 = p95Values.length ? Math.max(...p95Values) : null
+
+  function handleChartMonitorChange(id: string) {
+    setSearchParams((params) => {
+      const next = new URLSearchParams(params)
+      next.set('monitor', id)
+      return next
+    })
+  }
 
   return (
     <div className={styles.page}>
@@ -66,17 +93,33 @@ export function DashboardPage() {
           <strong>{data?.unknown ?? 0}</strong>
         </div>
         <div className={`${styles.statCard} ${styles.statBlue}`}>
-          <span>P95 延迟</span>
-          <strong>{latencyMs(p95)}</strong>
-          <small>基于最近一次检查</small>
+          <span>当前最慢延迟</span>
+          <strong>{latencyMs(slowestLatest?.latencyUs)}</strong>
+          <small>{slowestLatest ? `${slowestLatest.monitor.name} · 最近一次检查` : '基于最近一次检查'}</small>
         </div>
       </section>
 
       <section className={styles.dashboardGrid}>
         <div className={styles.card}>
           <div className={styles.cardHeader}>
-            <h2>延迟与可用性</h2>
-            <span>{chartMonitor?.name ?? '暂无监控项'}</span>
+            <div className={styles.titleBlock}>
+              <h2>延迟与可用性</h2>
+              <span>{chartMonitor?.name ?? '暂无监控项'}</span>
+            </div>
+            <select
+              className={styles.select}
+              value={chartMonitor?.id ?? ''}
+              onChange={(event) => handleChartMonitorChange(event.target.value)}
+              disabled={!monitors.length}
+              aria-label="选择趋势图监控项"
+            >
+              {!monitors.length ? <option value="">暂无监控项</option> : null}
+              {monitors.map((monitor) => (
+                <option key={monitor.id} value={monitor.id}>
+                  {monitor.name}
+                </option>
+              ))}
+            </select>
           </div>
           <div className={styles.chartBody}>
             {checks.data?.results?.length ? (
