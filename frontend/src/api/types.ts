@@ -48,6 +48,7 @@ export interface CheckResult {
   monitor_id: number
   status: CheckStatus
   latency_us: number | null
+  message: string
   checked_at: number
 }
 

@@ -7,7 +7,7 @@ use reqwest::Client;
 use crate::{
     domain::{check::CheckResult, monitor::Monitor},
     error::AppError,
-    probes::observation::{ProbeObservation, is_success},
+    probes::observation::{ProbeObservation, failure_reason},
 };
 
 /// 检查目标 URL 的状态码，并可选检查响应体正则。
@@ -52,19 +52,23 @@ pub async fn probe(monitor: &Monitor, timeout: Duration) -> Result<CheckResult, 
     observation.http_headers = headers;
     observation.http_body = body;
 
-    let success = is_success(monitor, &observation);
+    let failure_reason = failure_reason(monitor, &observation);
     tracing::debug!(
         monitor_id = monitor.id,
         status = status,
         latency_us = latency_us,
-        success = success,
+        success = failure_reason.is_none(),
         "http probe observed response"
     );
 
-    if success {
-        Ok(CheckResult::success(monitor.id, latency_us))
+    if let Some(message) = failure_reason {
+        Ok(CheckResult::failed_with_message(
+            monitor.id,
+            Some(latency_us),
+            message,
+        ))
     } else {
-        Ok(CheckResult::failed(monitor.id, Some(latency_us)))
+        Ok(CheckResult::success(monitor.id, latency_us))
     }
 }
 

@@ -15,6 +15,27 @@
   }
 }
 
+.tooltip {
+  display: grid;
+  gap: 5px;
+  padding: 10px 12px;
+  border: 1px solid #dde5ef;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 12px 32px rgb(15 23 42 / 12%);
+  color: #344054;
+  font-size: 12px;
+
+  strong {
+    color: #101828;
+    font-size: 12px;
+  }
+
+  span {
+    white-space: nowrap;
+  }
+}
+
 .success {
   background: #16a45d;
 }

@@ -40,7 +40,7 @@ pub async fn evaluate(
             id: None,
             monitor_id: monitor.id,
             kind: AlertKind::Triggered,
-            message: format!("{} is failing", monitor.name),
+            message: format!("{} is failing: {}", monitor.name, result.message),
             delivered: false,
             created_at: Utc::now(),
         })

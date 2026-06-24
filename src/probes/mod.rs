@@ -40,7 +40,7 @@ pub async fn run(monitor: &Monitor) -> Result<CheckResult, AppError> {
             target = %monitor.target,
             "probe failed before producing result"
         );
-        CheckResult::failed(monitor.id, None)
+        CheckResult::failed_with_message(monitor.id, None, error.to_string())
     });
     // 调度间隔以探测开始时间为准，避免探测耗时把下一次 5 秒 tick 挤到 10 秒后。
     result.checked_at = checked_at;
@@ -60,7 +60,10 @@ mod tests {
         let http = monitor(MonitorKind::Http, "not a url");
         let http_result = run(&http).await.unwrap();
         assert_eq!(http_result.monitor_id, http.id);
-        assert_eq!(http_result.status, crate::domain::check::CheckStatus::Failed);
+        assert_eq!(
+            http_result.status,
+            crate::domain::check::CheckStatus::Failed
+        );
 
         let tcp = monitor(MonitorKind::Tcp, "missing-port");
         let tcp_result = run(&tcp).await.unwrap();

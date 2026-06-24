@@ -1,28 +1,30 @@
 import {
   Activity,
   Bell,
-  CalendarDays,
   ChevronRight,
   Grid2X2,
   Menu,
   MonitorCheck,
-  RefreshCcw,
   Search,
   Settings,
   ShieldCheck,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { netwatchApi } from '../api/netwatch'
 import styles from './Layout.module.scss'
 
 const navItems = [
   { to: '/dashboard', label: '总览', icon: Grid2X2 },
   { to: '/monitors', label: '监控项', icon: MonitorCheck },
-  { to: '/alerts', label: '告警', icon: Bell, count: 2 },
+  { to: '/alerts', label: '告警', icon: Bell },
   { to: '/status', label: '状态页', icon: Activity },
   { to: '/settings', label: '设置', icon: Settings },
 ]
+
+const alertsViewedKey = 'netwatch.alerts.viewedAt'
 
 const titles: Record<string, string> = {
   '/dashboard': '总览 Dashboard',
@@ -41,14 +43,45 @@ export function Layout({ children }: LayoutProps) {
   const location = useLocation()
   const navigate = useNavigate()
   const [searchText, setSearchText] = useState('')
+  const [lastViewedAlertAt, setLastViewedAlertAt] = useState(() => {
+    const stored = window.localStorage.getItem(alertsViewedKey)
+    const timestamp = stored ? Number(stored) : 0
+    return Number.isFinite(timestamp) ? timestamp : 0
+  })
   const title =
     titles[location.pathname] ??
     (location.pathname.startsWith('/monitors/') ? '监控项 / 监控详情' : 'Netwatch')
+  const alerts = useQuery({
+    queryKey: ['alerts'],
+    queryFn: () => netwatchApi.alerts(500),
+    refetchInterval: 30_000,
+  })
+  const latestAlertAt = useMemo(
+    () => Math.max(0, ...(alerts.data ?? []).map((alert) => alert.created_at)),
+    [alerts.data],
+  )
+  const unreadTriggeredCount = useMemo(
+    () =>
+      (alerts.data ?? []).filter(
+        (alert) => alert.kind === 'triggered' && alert.created_at > lastViewedAlertAt,
+      ).length,
+    [alerts.data, lastViewedAlertAt],
+  )
+  const showAlertCount = location.pathname !== '/alerts' && unreadTriggeredCount > 0
 
   function submitSearch() {
     const keyword = searchText.trim()
     navigate(keyword ? `/monitors?keyword=${encodeURIComponent(keyword)}` : '/monitors')
   }
+
+  useEffect(() => {
+    if (location.pathname !== '/alerts' || !latestAlertAt) {
+      return
+    }
+
+    setLastViewedAlertAt(latestAlertAt)
+    window.localStorage.setItem(alertsViewedKey, String(latestAlertAt))
+  }, [latestAlertAt, location.pathname])
 
   return (
     <div className={styles.shell}>
@@ -69,7 +102,7 @@ export function Layout({ children }: LayoutProps) {
               >
                 <Icon size={18} />
                 <span>{item.label}</span>
-                {item.count ? <b>{item.count}</b> : null}
+                {item.to === '/alerts' && showAlertCount ? <b>{unreadTriggeredCount}</b> : null}
               </NavLink>
             )
           })}

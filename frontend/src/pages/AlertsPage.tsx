@@ -143,12 +143,12 @@ export function AlertsPage() {
                   <tr key={alert.id ?? `${alert.monitor_id}-${alert.created_at}`}>
                     <td>
                       <div className={styles.nameCell}>
-                        <strong>
+                        <strong className={styles.eventLabel}>
                           {alert.kind === 'recovered' ? (
                             <CheckCircle2 className={styles.ok} size={14} />
                           ) : (
                             <AlertCircle className={styles.bad} size={14} />
-                          )}{' '}
+                          )}
                           {alertLabel[alert.kind]}
                         </strong>
                         <span>{alert.delivered ? '已投递' : '未投递'}</span>
@@ -167,7 +167,7 @@ export function AlertsPage() {
                         <span>{relativeTime(alert.created_at)}</span>
                       </div>
                     </td>
-                    <td>{alert.message}</td>
+                    <td className={styles.reasonCell}>{alert.message}</td>
                     <td>
                       <Badge tone={currentStatus === 'success' ? 'green' : currentStatus === 'failed' ? 'red' : 'gray'}>
                         {currentStatus === 'success' ? '正常' : currentStatus === 'failed' ? '故障' : '未知'}

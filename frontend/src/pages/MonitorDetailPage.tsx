@@ -86,9 +86,13 @@ export function MonitorDetailPage() {
           <div className={styles.detailTitle}>
             <Globe2 size={28} />
             <div>
-              <h1>{monitor.data.name}</h1>
-              <p>
-                类型：{kindLabel[monitor.data.kind]} 目标：{monitor.data.target} ID：{monitor.data.id}
+              <div className={styles.titleLine}>
+                <h1>{monitor.data.name}</h1>
+                <span className={styles.idPill}>#{monitor.data.id}</span>
+              </div>
+              <p className={styles.metaLine}>
+                <span>类型：{kindLabel[monitor.data.kind]}</span>
+                <span>目标：{monitor.data.target}</span>
               </p>
             </div>
             <Badge tone={status === 'success' ? 'green' : status === 'failed' ? 'red' : 'gray'}>
@@ -124,7 +128,7 @@ export function MonitorDetailPage() {
           <strong className={status === 'success' ? styles.ok : status === 'failed' ? styles.bad : ''}>
             {statusLabel[status]}
           </strong>
-          <small>自 {compactTime(latest?.kind === 'raw' ? latest.checked_at : null)} 起</small>
+          <small>{latest?.kind === 'raw' ? latest.message || '暂无详细原因' : '暂无检查结果'}</small>
         </div>
         <div className={`${styles.statCard} ${styles.statBlue}`}>
           <span>最近延迟</span>
@@ -257,7 +261,7 @@ export function MonitorDetailPage() {
                       </Badge>
                     </td>
                     <td>{latencyMs(point.latency_us)}</td>
-                    <td>{point.status === 'failed' ? '探测失败或超时' : '-'}</td>
+                    <td className={styles.reasonCell}>{point.message || '-'}</td>
                   </tr>
                 ))}
             </tbody>

@@ -41,6 +41,8 @@ pub struct CheckResult {
     pub status: CheckStatus,
     /// 成功探测的耗时；失败或 unknown 时可以为空。
     pub latency_us: Option<u64>,
+    /// 面向 UI 和告警的可读探测原因。
+    pub message: String,
     #[serde(with = "chrono::serde::ts_seconds")]
     #[schema(value_type = i64)]
     pub checked_at: DateTime<Utc>,
@@ -54,6 +56,7 @@ impl CheckResult {
             monitor_id,
             status: CheckStatus::Success,
             latency_us: Some(latency_us),
+            message: "探测成功".to_string(),
             checked_at: Utc::now(),
         }
     }
@@ -65,6 +68,23 @@ impl CheckResult {
             monitor_id,
             status: CheckStatus::Failed,
             latency_us,
+            message: "探测失败或超时".to_string(),
+            checked_at: Utc::now(),
+        }
+    }
+
+    /// 构造带具体原因的失败探测结果。
+    pub fn failed_with_message(
+        monitor_id: i64,
+        latency_us: Option<u64>,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            id: None,
+            monitor_id,
+            status: CheckStatus::Failed,
+            latency_us,
+            message: message.into(),
             checked_at: Utc::now(),
         }
     }
@@ -77,6 +97,7 @@ impl CheckResult {
             monitor_id,
             status: CheckStatus::Unknown,
             latency_us: None,
+            message: "缺少检查数据".to_string(),
             checked_at,
         }
     }
@@ -356,6 +377,7 @@ mod tests {
 
         assert_eq!(value["checked_at"], json!(1_781_683_750_i64));
         assert_eq!(value["latency_us"], json!(10));
+        assert_eq!(value["message"], json!("探测成功"));
         assert!(value.get("latency_ms").is_none());
     }
 

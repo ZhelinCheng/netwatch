@@ -25,88 +25,129 @@ impl ProbeObservation {
 }
 
 /// 判断一次探测是否满足成功条件。
+#[cfg(test)]
 pub fn is_success(monitor: &Monitor, observation: &ProbeObservation) -> bool {
-    default_success(monitor, observation)
+    failure_reason(monitor, observation).is_none()
 }
 
-/// 未配置自定义规则时，各协议使用的默认成功判断。
-fn default_success(monitor: &Monitor, observation: &ProbeObservation) -> bool {
+/// 返回不满足成功条件的第一条可读原因。
+pub fn failure_reason(monitor: &Monitor, observation: &ProbeObservation) -> Option<String> {
     match monitor.kind {
         MonitorKind::Http => {
             let Some(status) = observation.http_status else {
-                return false;
+                return Some("未收到 HTTP 响应状态码".to_string());
             };
 
             if let Some(expected) = monitor.config.expected_status {
                 if status != expected {
-                    return false;
+                    return Some(format!("HTTP 状态码为 {status}，期望 {expected}"));
                 }
             } else {
                 let min = monitor.config.expected_status_min.unwrap_or(200);
                 let max = monitor.config.expected_status_max.unwrap_or(400);
                 if status < min || status >= max {
-                    return false;
+                    let max_display = max.saturating_sub(1);
+                    return Some(format!(
+                        "HTTP 状态码为 {status}，不在期望范围 {min}-{max_display}"
+                    ));
                 }
             }
 
             if let Some(keyword) = &monitor.config.keyword {
                 let Some(body) = observation.http_body.as_deref() else {
-                    return false;
+                    return Some("响应体未读取，无法匹配关键词".to_string());
                 };
-                let Ok(regex) = regex::Regex::new(keyword) else {
-                    return false;
+                let regex = match regex::Regex::new(keyword) {
+                    Ok(regex) => regex,
+                    Err(error) => {
+                        return Some(format!("响应关键词正则无效：{error}"));
+                    }
                 };
                 if !regex.is_match(body) {
-                    return false;
-                }
+                    return Some(format!("响应体未匹配关键词/正则：{keyword}"));
+                };
             }
 
-            headers_match(monitor, observation)
+            headers_failure_reason(monitor, observation)
         }
-        MonitorKind::Ping | MonitorKind::Tcp => true,
+        MonitorKind::Ping | MonitorKind::Tcp => None,
         MonitorKind::Dns => {
             if observation.dns_answers.is_empty() {
-                return false;
+                return Some("DNS 未返回任何记录".to_string());
             }
             if let Some(expected) = &monitor.config.expected_value {
-                observation
+                if observation
                     .dns_answers
                     .iter()
                     .any(|value| value == expected)
+                {
+                    None
+                } else {
+                    Some(format!(
+                        "DNS 结果未包含期望值 {expected}，实际为 {}",
+                        observation.dns_answers.join(", ")
+                    ))
+                }
             } else {
-                true
+                None
             }
         }
     }
 }
 
-fn headers_match(monitor: &Monitor, observation: &ProbeObservation) -> bool {
+fn headers_failure_reason(monitor: &Monitor, observation: &ProbeObservation) -> Option<String> {
     let rules = monitor
         .config
         .expected_headers
         .as_deref()
         .unwrap_or_default();
     if rules.is_empty() {
-        return true;
+        return None;
     }
 
-    let rule_matches = |key: &str, value: &str| {
+    let rule_matches = |key: &str, value: &str| -> Result<bool, String> {
         let normalized_key = key.to_ascii_lowercase();
         let Some(header_value) = observation.http_headers.get(&normalized_key) else {
-            return false;
+            return Ok(false);
         };
         regex::Regex::new(value)
             .map(|regex| regex.is_match(header_value))
-            .unwrap_or(false)
+            .map_err(|error| format!("响应头 {key} 的正则无效：{error}"))
     };
 
     match monitor.config.header_match_mode {
-        Some(HeaderMatchMode::Any) => rules
-            .iter()
-            .any(|rule| rule_matches(rule.key.trim(), rule.value.trim())),
-        _ => rules
-            .iter()
-            .all(|rule| rule_matches(rule.key.trim(), rule.value.trim())),
+        Some(HeaderMatchMode::Any) => {
+            let mut errors = Vec::new();
+            for rule in rules {
+                match rule_matches(rule.key.trim(), rule.value.trim()) {
+                    Ok(true) => return None,
+                    Ok(false) => {}
+                    Err(error) => errors.push(error),
+                }
+            }
+            errors
+                .into_iter()
+                .next()
+                .or_else(|| Some("没有任何响应头规则匹配".to_string()))
+        }
+        _ => {
+            for rule in rules {
+                let key = rule.key.trim();
+                let expected = rule.value.trim();
+                match rule_matches(key, expected) {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        let actual = observation
+                            .http_headers
+                            .get(&key.to_ascii_lowercase())
+                            .map_or("未返回".to_string(), |value| format!("实际值：{value}"));
+                        return Some(format!("响应头 {key} 未匹配 {expected}（{actual}）"));
+                    }
+                    Err(error) => return Some(error),
+                }
+            }
+            None
+        }
     }
 }
 
@@ -143,6 +184,10 @@ mod tests {
 
         observation.http_status = Some(404);
         assert!(!is_success(&monitor, &observation));
+        assert_eq!(
+            failure_reason(&monitor, &observation),
+            Some("HTTP 状态码为 404，不在期望范围 200-399".to_string())
+        );
     }
 
     #[test]
@@ -206,6 +251,24 @@ mod tests {
         let mut observation = ProbeObservation::new();
         observation.dns_answers = vec!["1.1.1.1".into()];
         assert!(is_success(&monitor, &observation));
+    }
+
+    #[test]
+    fn failure_reason_describes_dns_mismatch() {
+        let monitor = monitor(
+            MonitorKind::Dns,
+            MonitorConfig {
+                expected_value: Some("1.1.1.1".into()),
+                ..MonitorConfig::default()
+            },
+        );
+        let mut observation = ProbeObservation::new();
+        observation.dns_answers = vec!["8.8.8.8".into()];
+
+        assert_eq!(
+            failure_reason(&monitor, &observation),
+            Some("DNS 结果未包含期望值 1.1.1.1，实际为 8.8.8.8".to_string())
+        );
     }
 
     #[test]

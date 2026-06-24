@@ -32,14 +32,15 @@ async fn insert_tx(tx: &mut Transaction<'_, Sqlite>, result: &CheckResult) -> Re
     sqlx::query(
         r#"
         INSERT INTO check_results (
-            monitor_id, status, latency_us, checked_at
+            monitor_id, status, latency_us, message, checked_at
         )
-        VALUES (?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?)
         "#,
     )
     .bind(result.monitor_id)
     .bind(result.status.as_str())
     .bind(result.latency_us.map(|value| value as i64))
+    .bind(&result.message)
     .bind(to_timestamp_seconds(result.checked_at))
     .execute(&mut **tx)
     .await?;
@@ -55,7 +56,7 @@ pub async fn list_for_monitor(
     // 详情页按最近结果展示，因此这里统一按 checked_at 倒序返回。
     let rows = sqlx::query(
         r#"
-        SELECT id, monitor_id, status, latency_us, checked_at
+        SELECT id, monitor_id, status, latency_us, message, checked_at
         FROM check_results
         WHERE monitor_id = ?
         ORDER BY checked_at DESC
@@ -79,7 +80,7 @@ pub async fn list_for_monitor_between(
 ) -> Result<Vec<CheckResult>, AppError> {
     let rows = sqlx::query(
         r#"
-        SELECT id, monitor_id, status, latency_us, checked_at
+        SELECT id, monitor_id, status, latency_us, message, checked_at
         FROM check_results
         WHERE monitor_id = ? AND checked_at >= ? AND checked_at <= ?
         ORDER BY checked_at ASC
@@ -103,7 +104,7 @@ pub async fn list_for_monitor_between_tx(
 ) -> Result<Vec<CheckResult>, AppError> {
     let rows = sqlx::query(
         r#"
-        SELECT id, monitor_id, status, latency_us, checked_at
+        SELECT id, monitor_id, status, latency_us, message, checked_at
         FROM check_results
         WHERE monitor_id = ? AND checked_at >= ? AND checked_at < ?
         ORDER BY checked_at ASC
@@ -122,7 +123,7 @@ pub async fn list_for_monitor_between_tx(
 pub async fn latest_by_monitor(pool: &SqlitePool) -> Result<Vec<CheckResult>, AppError> {
     let rows = sqlx::query(
         r#"
-        SELECT cr.id, cr.monitor_id, cr.status, cr.latency_us, cr.checked_at
+        SELECT cr.id, cr.monitor_id, cr.status, cr.latency_us, cr.message, cr.checked_at
         FROM check_results cr
         JOIN (
             SELECT monitor_id, MAX(checked_at) AS checked_at
@@ -182,6 +183,7 @@ fn row_to_check(row: sqlx::sqlite::SqliteRow) -> Result<CheckResult, AppError> {
         monitor_id: row.try_get("monitor_id")?,
         status: CheckStatus::from(status.as_str()),
         latency_us: latency_us.map(|value| value as u64),
+        message: row.try_get("message")?,
         checked_at: from_timestamp_seconds(checked_at)?,
     })
 }
@@ -208,6 +210,7 @@ mod tests {
         let mut first = CheckResult::success(monitor.id, 10);
         first.checked_at = base;
         let mut second = CheckResult::failed(monitor.id, Some(20));
+        second.message = "HTTP 状态码 500 不在期望范围 200-399".to_string();
         second.checked_at = base + Duration::seconds(5);
 
         let mut tx = pool.begin().await.unwrap();
@@ -219,6 +222,7 @@ mod tests {
         let recent = list_for_monitor(&pool, monitor.id, 10).await.unwrap();
         assert_eq!(recent.len(), 2);
         assert_eq!(recent[0].status, CheckStatus::Failed);
+        assert_eq!(recent[0].message, "HTTP 状态码 500 不在期望范围 200-399");
 
         let ranged = list_for_monitor_between(&pool, monitor.id, base, base + Duration::seconds(5))
             .await
@@ -240,9 +244,17 @@ mod tests {
             .unwrap();
         tx.commit().await.unwrap();
 
-        assert_eq!(list_for_monitor(&pool, monitor.id, 10).await.unwrap().len(), 1);
+        assert_eq!(
+            list_for_monitor(&pool, monitor.id, 10).await.unwrap().len(),
+            1
+        );
         delete_for_monitor(&pool, monitor.id).await.unwrap();
-        assert!(list_for_monitor(&pool, monitor.id, 10).await.unwrap().is_empty());
+        assert!(
+            list_for_monitor(&pool, monitor.id, 10)
+                .await
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[tokio::test]
