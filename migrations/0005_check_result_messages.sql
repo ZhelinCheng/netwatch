@@ -1,2 +1,0 @@
-ALTER TABLE check_results
-ADD COLUMN message TEXT NOT NULL DEFAULT '';

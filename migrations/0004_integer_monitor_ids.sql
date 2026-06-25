@@ -27,6 +27,7 @@ CREATE TABLE check_results (
     monitor_id INTEGER NOT NULL,
     status TEXT NOT NULL,
     latency_us INTEGER,
+    message TEXT NOT NULL,
     checked_at INTEGER NOT NULL,
     FOREIGN KEY (monitor_id) REFERENCES monitors(id) ON DELETE CASCADE
 );

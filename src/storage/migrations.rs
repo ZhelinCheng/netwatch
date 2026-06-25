@@ -9,8 +9,6 @@ const SIMPLIFY_CHECK_RESULTS_SQL: &str =
     include_str!("../../migrations/0002_simplify_check_results.sql");
 const CHECK_AGGREGATES_SQL: &str = include_str!("../../migrations/0003_check_aggregates.sql");
 const INTEGER_MONITOR_IDS_SQL: &str = include_str!("../../migrations/0004_integer_monitor_ids.sql");
-const CHECK_RESULT_MESSAGES_SQL: &str =
-    include_str!("../../migrations/0005_check_result_messages.sql");
 
 /// 依次执行初始化 SQL 中的语句。
 pub async fn run(pool: &SqlitePool) -> anyhow::Result<()> {
@@ -30,7 +28,6 @@ pub async fn run(pool: &SqlitePool) -> anyhow::Result<()> {
         ("0002_simplify_check_results", SIMPLIFY_CHECK_RESULTS_SQL),
         ("0003_check_aggregates", CHECK_AGGREGATES_SQL),
         ("0004_integer_monitor_ids", INTEGER_MONITOR_IDS_SQL),
-        ("0005_check_result_messages", CHECK_RESULT_MESSAGES_SQL),
     ] {
         let applied: Option<(String,)> =
             sqlx::query_as("SELECT name FROM _netwatch_migrations WHERE name = ?")
