@@ -9,6 +9,31 @@ use crate::{
     storage::time::{from_timestamp_seconds, to_timestamp_seconds},
 };
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct StatusCounts {
+    pub success: u64,
+    pub failed: u64,
+}
+
+impl StatusCounts {
+    pub fn add_result(&mut self, result: &CheckResult) {
+        match result.status {
+            CheckStatus::Success => self.success += 1,
+            CheckStatus::Failed => self.failed += 1,
+            CheckStatus::Unknown => {}
+        }
+    }
+
+    pub fn availability(&self) -> f64 {
+        let measured = self.success + self.failed;
+        if measured == 0 {
+            0.0
+        } else {
+            (self.success as f64 / measured as f64) * 100.0
+        }
+    }
+}
+
 /// 在事务内批量写入探测结果。
 pub async fn insert_many_tx(
     tx: &mut Transaction<'_, Sqlite>,
@@ -93,6 +118,41 @@ pub async fn list_for_monitor_between(
     .await?;
 
     rows.into_iter().map(row_to_check).collect()
+}
+
+/// 按时间范围统计每个监控项的成功/失败数量，用于 Dashboard 可用率汇总。
+pub async fn status_counts_by_monitor_between(
+    pool: &SqlitePool,
+    from: DateTime<Utc>,
+    to: DateTime<Utc>,
+) -> Result<std::collections::HashMap<i64, StatusCounts>, AppError> {
+    let rows = sqlx::query(
+        r#"
+        SELECT monitor_id,
+               SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS success_count,
+               SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed_count
+        FROM check_results
+        WHERE checked_at >= ? AND checked_at <= ?
+        GROUP BY monitor_id
+        "#,
+    )
+    .bind(to_timestamp_seconds(from))
+    .bind(to_timestamp_seconds(to))
+    .fetch_all(pool)
+    .await?;
+
+    let mut counts = std::collections::HashMap::new();
+    for row in rows {
+        counts.insert(
+            row.try_get("monitor_id")?,
+            StatusCounts {
+                success: row.try_get::<i64, _>("success_count")? as u64,
+                failed: row.try_get::<i64, _>("failed_count")? as u64,
+            },
+        );
+    }
+
+    Ok(counts)
 }
 
 /// 在事务内按时间范围列出原始探测结果。

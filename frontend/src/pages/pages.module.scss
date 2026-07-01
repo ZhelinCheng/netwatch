@@ -230,6 +230,8 @@
   gap: 12px;
 
   > .card:first-child {
+    display: flex;
+    flex-direction: column;
     grid-column: span 3;
   }
 
@@ -245,6 +247,15 @@
 
 .chartBody {
   padding: 16px 18px 18px;
+}
+
+.dashboardChartBody {
+  flex: 1;
+  min-height: 220px;
+
+  > * {
+    height: 100%;
+  }
 }
 
 .rangeTabs {
@@ -357,6 +368,16 @@
     display: block;
     background: #16a45d;
   }
+}
+
+.availabilityCell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 128px;
+  color: #667085;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 
 .alertList {

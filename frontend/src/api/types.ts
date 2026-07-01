@@ -99,6 +99,7 @@ export interface AlertEvent {
 export interface Dashboard {
   monitors: Monitor[]
   latest: Record<string, CheckResult>
+  availability: Record<string, number>
   alerts: AlertEvent[]
   total: number
   success: number

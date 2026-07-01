@@ -23,6 +23,8 @@ pub struct Dashboard {
     monitors: Vec<Monitor>,
     /// 每个监控项最近一次探测结果，key 为 monitor id。
     latest: HashMap<i64, crate::domain::check::CheckResult>,
+    /// 每个监控项最近 1 小时可用率，key 为 monitor id。
+    availability: HashMap<i64, f64>,
     /// 最近告警事件。
     alerts: Vec<crate::domain::alert::AlertEvent>,
     total: usize,
@@ -56,6 +58,7 @@ pub(crate) async fn dashboard(State(state): State<AppState>) -> Result<Json<Dash
         .collect();
     let buffered_latest = state.check_buffer().latest_by_monitor().await;
     let latest = merge_latest(latest, buffered_latest);
+    let availability = availability_by_monitor(&state, &monitors).await?;
     let alerts = alerts::list(state.pool(), 10).await?;
     let total = monitors.len();
     // Dashboard 的当前状态只看最新一次探测结果；没有结果的监控项不计入 up/down。
@@ -72,6 +75,7 @@ pub(crate) async fn dashboard(State(state): State<AppState>) -> Result<Json<Dash
     Ok(Json(Dashboard {
         monitors,
         latest,
+        availability,
         alerts,
         total,
         success,
@@ -91,6 +95,37 @@ fn merge_latest(
         }
     }
     latest
+}
+
+async fn availability_by_monitor(
+    state: &AppState,
+    monitors: &[Monitor],
+) -> Result<HashMap<i64, f64>, AppError> {
+    let to = chrono::Utc::now();
+    let from = to - chrono::Duration::hours(1);
+    let mut counts = checks::status_counts_by_monitor_between(state.pool(), from, to).await?;
+
+    for monitor in monitors {
+        for result in state
+            .check_buffer()
+            .list_for_monitor_between(monitor.id, from, to)
+            .await
+        {
+            counts.entry(monitor.id).or_default().add_result(&result);
+        }
+    }
+
+    Ok(monitors
+        .iter()
+        .map(|monitor| {
+            (
+                monitor.id,
+                counts
+                    .get(&monitor.id)
+                    .map_or(0.0, checks::StatusCounts::availability),
+            )
+        })
+        .collect())
 }
 
 #[utoipa::path(
@@ -130,8 +165,9 @@ mod tests {
         let monitor = monitors::insert(state.pool(), &test_support::monitor(MonitorKind::Http))
             .await
             .unwrap();
+        let base_time = Utc::now() - Duration::seconds(10);
         let mut persisted = CheckResult::failed(monitor.id, None);
-        persisted.checked_at = Utc::now();
+        persisted.checked_at = base_time;
         let mut tx = state.pool().begin().await.unwrap();
         checks::insert_many_tx(&mut tx, &[persisted.clone()])
             .await
@@ -139,7 +175,7 @@ mod tests {
         tx.commit().await.unwrap();
 
         let mut buffered = CheckResult::success(monitor.id, 10);
-        buffered.checked_at = persisted.checked_at + Duration::seconds(5);
+        buffered.checked_at = base_time + Duration::seconds(5);
         state.check_buffer().append(buffered).await;
 
         let Json(data) = dashboard(State(state.clone())).await.unwrap();
@@ -148,9 +184,11 @@ mod tests {
         assert_eq!(data.failed, 0);
         assert_eq!(data.unknown, 0);
         assert_eq!(data.latest.get(&monitor.id).unwrap().latency_us, Some(10));
+        assert_eq!(data.availability.get(&monitor.id), Some(&50.0));
 
-        let Json(status_data) =
-            status_page(State(state), Path("public".to_string())).await.unwrap();
+        let Json(status_data) = status_page(State(state), Path("public".to_string()))
+            .await
+            .unwrap();
         assert_eq!(status_data.total, 1);
     }
 

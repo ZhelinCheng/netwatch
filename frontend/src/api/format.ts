@@ -35,6 +35,28 @@ export function compactTime(timestamp?: number | null) {
   }).format(new Date(timestamp * 1000))
 }
 
+export function alertTime(timestamp?: number | null) {
+  if (!timestamp) return '-'
+  const date = new Date(timestamp * 1000)
+  const ageSeconds = Math.floor(Date.now() / 1000 - timestamp)
+  const options: Intl.DateTimeFormatOptions =
+    ageSeconds >= 24 * 60 * 60
+      ? {
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+        }
+      : {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+        }
+
+  return new Intl.DateTimeFormat('zh-CN', options).format(date)
+}
+
 export function dateTime(timestamp?: number | null) {
   if (!timestamp) return '-'
   return new Intl.DateTimeFormat('zh-CN', {

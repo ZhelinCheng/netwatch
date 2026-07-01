@@ -5,7 +5,16 @@ import { useQuery } from '@tanstack/react-query'
 import { Badge } from '../components/Badge'
 import { EmptyState } from '../components/EmptyState'
 import { StatusChart } from '../components/StatusChart'
-import { alertLabel, compactTime, intervalLabel, kindLabel, latencyMs, statusLabel } from '../api/format'
+import {
+  alertLabel,
+  alertTime,
+  clampPercent,
+  compactTime,
+  intervalLabel,
+  kindLabel,
+  latencyMs,
+  statusLabel,
+} from '../api/format'
 import { netwatchApi } from '../api/netwatch'
 import type { Monitor } from '../api/types'
 import styles from './pages.module.scss'
@@ -29,6 +38,7 @@ export function DashboardPage() {
   const monitors = data?.monitors ?? []
   const enabledCount = monitors.filter((monitor) => monitor.enabled).length
   const latest = data?.latest ?? {}
+  const availability = data?.availability ?? {}
   const selectedMonitorId = Number(searchParams.get('monitor'))
   const chartMonitor = useMemo(() => {
     const selected = Number.isFinite(selectedMonitorId)
@@ -121,9 +131,9 @@ export function DashboardPage() {
               ))}
             </select>
           </div>
-          <div className={styles.chartBody}>
+          <div className={`${styles.chartBody} ${styles.dashboardChartBody}`}>
             {checks.data?.results?.length ? (
-              <StatusChart points={checks.data.results} />
+              <StatusChart points={checks.data.results} height="100%" />
             ) : (
               <EmptyState title="暂无趋势数据" description="等待调度器写入检查结果后将显示延迟曲线。" />
             )}
@@ -150,7 +160,7 @@ export function DashboardPage() {
                     <strong>{alert.message}</strong>
                     <p>{alertLabel[alert.kind]}</p>
                   </div>
-                  <time>{compactTime(alert.created_at)}</time>
+                  <time>{alertTime(alert.created_at)}</time>
                 </div>
               ))
             ) : (
@@ -176,7 +186,7 @@ export function DashboardPage() {
                 <th>目标</th>
                 <th>状态</th>
                 <th>延迟</th>
-                <th>最近可用</th>
+                <th>近 1 小时可用</th>
                 <th>最近检查</th>
                 <th>间隔</th>
               </tr>
@@ -185,6 +195,7 @@ export function DashboardPage() {
               {monitors.map((monitor) => {
                 const result = latest[String(monitor.id)]
                 const status = result?.status ?? 'unknown'
+                const recentAvailability = clampPercent(availability[String(monitor.id)] ?? 0)
                 return (
                   <tr key={monitor.id}>
                     <td>
@@ -203,8 +214,11 @@ export function DashboardPage() {
                     </td>
                     <td>{latencyMs(result?.latency_us)}</td>
                     <td>
-                      <span className={styles.bar}>
-                        <span style={{ width: status === 'success' ? '100%' : '0%' }} />
+                      <span className={styles.availabilityCell}>
+                        <span className={styles.bar}>
+                          <span style={{ width: `${recentAvailability}%` }} />
+                        </span>
+                        <span>{recentAvailability.toFixed(1)}%</span>
                       </span>
                     </td>
                     <td>{compactTime(result?.checked_at)}</td>

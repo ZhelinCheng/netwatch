@@ -1,5 +1,12 @@
 .chart {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
   min-width: 0;
+  min-height: 0;
+}
+
+.plot {
+  min-height: 0;
 }
 
 .timeline {

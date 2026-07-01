@@ -14,7 +14,7 @@ import styles from './StatusChart.module.scss'
 
 interface StatusChartProps {
   points: CheckSeriesPoint[]
-  height?: number
+  height?: number | `${number}%`
 }
 
 export function StatusChart({ points, height = 240 }: StatusChartProps) {
@@ -40,52 +40,54 @@ export function StatusChart({ points, height = 240 }: StatusChartProps) {
 
   return (
     <div className={styles.chart}>
-      <ResponsiveContainer width="100%" height={height}>
-        <ComposedChart data={data} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
-          <CartesianGrid stroke="#edf1f6" strokeDasharray="3 3" />
-          <XAxis
-            dataKey="label"
-            tickLine={false}
-            axisLine={false}
-            minTickGap={28}
-            tick={{ fill: '#667085', fontSize: 12 }}
-          />
-          <YAxis
-            tickLine={false}
-            axisLine={false}
-            width={42}
-            tick={{ fill: '#667085', fontSize: 12 }}
-          />
-          <Tooltip
-            content={<LatencyTooltip />}
-            labelFormatter={(_, payload) => `检查时间 ${payload?.[0]?.payload?.tooltipLabel ?? '-'}`}
-            contentStyle={{
-              border: '1px solid #dde5ef',
-              borderRadius: 8,
-              boxShadow: '0 12px 32px rgba(15, 23, 42, 0.12)',
-            }}
-          />
-          <Area
-            type="linear"
-            dataKey="latencyRange"
-            fill="#b9d7ff"
-            fillOpacity={0.42}
-            stroke="none"
-            connectNulls={false}
-            isAnimationActive={false}
-          />
-          <Line
-            type="linear"
-            dataKey="latency"
-            stroke="#176df2"
-            strokeWidth={2}
-            dot={false}
-            connectNulls={false}
-            activeDot={{ r: 4 }}
-            isAnimationActive={false}
-          />
-        </ComposedChart>
-      </ResponsiveContainer>
+      <div className={styles.plot}>
+        <ResponsiveContainer width="100%" height={height}>
+          <ComposedChart data={data} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
+            <CartesianGrid stroke="#edf1f6" strokeDasharray="3 3" />
+            <XAxis
+              dataKey="label"
+              tickLine={false}
+              axisLine={false}
+              minTickGap={28}
+              tick={{ fill: '#667085', fontSize: 12 }}
+            />
+            <YAxis
+              tickLine={false}
+              axisLine={false}
+              width={42}
+              tick={{ fill: '#667085', fontSize: 12 }}
+            />
+            <Tooltip
+              content={<LatencyTooltip />}
+              labelFormatter={(_, payload) => `检查时间 ${payload?.[0]?.payload?.tooltipLabel ?? '-'}`}
+              contentStyle={{
+                border: '1px solid #dde5ef',
+                borderRadius: 8,
+                boxShadow: '0 12px 32px rgba(15, 23, 42, 0.12)',
+              }}
+            />
+            <Area
+              type="linear"
+              dataKey="latencyRange"
+              fill="#b9d7ff"
+              fillOpacity={0.42}
+              stroke="none"
+              connectNulls={false}
+              isAnimationActive={false}
+            />
+            <Line
+              type="linear"
+              dataKey="latency"
+              stroke="#176df2"
+              strokeWidth={2}
+              dot={false}
+              connectNulls={false}
+              activeDot={{ r: 4 }}
+              isAnimationActive={false}
+            />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
       <div className={styles.timeline} aria-label="状态时间轴">
         {data.slice(-90).map((point, index) => (
           <span key={`${point.time}-${index}`} className={styles[point.status]} title={point.label} />

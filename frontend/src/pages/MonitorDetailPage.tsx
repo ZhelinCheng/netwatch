@@ -235,9 +235,6 @@ export function MonitorDetailPage() {
       <section className={styles.card}>
         <div className={styles.cardHeader}>
           <h2>最近检查结果</h2>
-          <button className={styles.ghostButton} type="button" onClick={() => latestChecks.refetch()}>
-            查看全部
-          </button>
         </div>
         <div className={styles.tableWrap}>
           <table className={styles.table}>
